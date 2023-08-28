@@ -32,7 +32,7 @@ use bsp::hal::{
 };
 
 use fugit::RateExtU32;
-use i2c_device::{Ada88, I2cDev, I2cEnv};
+use i2c_device::{Ada88, I2cEnv};
 
 // for USB MIDI
 use usb_device::{class_prelude::*, prelude::*};
@@ -103,7 +103,6 @@ fn main() -> ! {
         &clocks.system_clock,
     ));
     let mut ada = Ada88::init(&mut i2c);
-    ada.write(&mut i2c);
 
     // GPIO
     let mut led_pin = pins.led.into_push_pull_output();
@@ -130,6 +129,10 @@ fn main() -> ! {
         }
     };
 
+    ada.write_letter(&mut i2c, 1);
+    delay.delay_ms(2000);
+    let mut count = 0;
+
     loop {
         info!("on!");
         output_midi_msg(Message::NoteOn(
@@ -137,7 +140,8 @@ fn main() -> ! {
             Note::C3,
             FromClamped::from_clamped(100),
         ));
-        ada.write_letter(&mut i2c, 1);
+        ada.write_number(&mut i2c, count);
+        count += 1;
         led_pin.set_high().unwrap();
         delay.delay_ms(500);
 
@@ -147,7 +151,7 @@ fn main() -> ! {
             Note::C3,
             FromClamped::from_clamped(64),
         ));
-        ada.write_letter(&mut i2c, 2);
+        //ada.write_letter(&mut i2c, 2);
         led_pin.set_low().unwrap();
         delay.delay_ms(500);
     }

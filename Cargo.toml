@@ -27,6 +27,10 @@ usbd-midi = "0.2.0"
 # rp2040-hal = { version="0.8", features=["rt", "critical-section-impl"] }
 # rp2040-boot2 = "0.2"
 
+[features]
+default = ["ada88"]
+ada88 = []
+
 # cargo build/run
 [profile.dev]
 codegen-units = 1

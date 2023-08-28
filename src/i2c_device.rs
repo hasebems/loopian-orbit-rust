@@ -42,9 +42,16 @@ pub trait I2cDev {
     fn write(&mut self, env: &mut I2cEnv);
 }
 //*******************************************************************
+//          CY8CMBR3110 Touch Sensor
+//*******************************************************************
+
+
+//*******************************************************************
 //          Ada fruit 8*8 LED matrix
 //*******************************************************************
-pub struct Ada88 {}
+#[cfg(feature = "ada88")]
+pub struct Ada88();
+#[cfg(feature = "ada88")]
 impl Ada88 {
     const I2C_ADRS: u8 = 0x70;
     pub fn init(env: &mut I2cEnv) -> Self {
@@ -83,8 +90,63 @@ impl Ada88 {
         }
         env.write_dt(Self::I2C_ADRS, &wrdt);
     }
-}
-impl I2cDev for Ada88 {
-    fn read(&self, _env: &mut I2cEnv) {}
-    fn write(&mut self, _env: &mut I2cEnv) {}
+    pub fn write_number(&mut self, env: &mut I2cEnv, num: i16) { //	num 1999 .. -1999
+        let mut cnvt_num: i16 = num;
+        const NUM_LETTER: [[u8; 5];10] = [
+            [ 0x07, 0x05, 0x05, 0x05, 0x07 ],
+            [ 0x04, 0x04, 0x04, 0x04, 0x04 ],
+            [ 0x07, 0x04, 0x07, 0x01, 0x07 ],
+            [ 0x07, 0x04, 0x07, 0x04, 0x07 ],
+            [ 0x05, 0x05, 0x07, 0x04, 0x04 ],
+            [ 0x07, 0x01, 0x07, 0x04, 0x07 ],
+            [ 0x07, 0x01, 0x07, 0x05, 0x07 ],
+            [ 0x07, 0x04, 0x04, 0x04, 0x04 ],
+            [ 0x07, 0x05, 0x07, 0x05, 0x07 ],
+            [ 0x07, 0x05, 0x07, 0x04, 0x07 ]
+        ];
+        const GRAPH: [[u8; 2]; 10] = [
+            [ 0x00, 0x00 ],
+            [ 0x00, 0x40 ],
+            [ 0x40, 0x60 ],
+            [ 0x60, 0x70 ],
+            [ 0x70, 0x78 ],
+            [ 0x78, 0x7c ],
+            [ 0x7c, 0x7e ],
+            [ 0x7e, 0x7f ],
+            [ 0x7f, 0xff ],
+            [ 0xff, 0xff ],
+        ];
+
+        if num > 1999 { cnvt_num = 1999; }
+        else if num < -1999 { cnvt_num = -1999;}
+
+        let mut led_ptn: [u8; 8] = [0; 8];
+        //	+/-, over 1000 or not
+        if cnvt_num/1000 != 0 { led_ptn[5] |= 0x80; }
+        if cnvt_num < 0 {
+            led_ptn[2] |= 0x80;
+            cnvt_num = -cnvt_num;
+        }
+
+        let num3digits = cnvt_num%1000;
+        let hundred = (num3digits/100) as usize;
+        let num2degits = (num3digits%100) as usize;
+        let deci = num2degits/10;
+        let z2n = num2degits%10;
+    
+        for i in 0..5 {
+            led_ptn[i] |= NUM_LETTER[hundred][i];
+            led_ptn[i] |= NUM_LETTER[deci][i] << 4;
+        }
+        for i in 0..2 {
+            led_ptn[i+6] |= GRAPH[z2n][i];
+        }
+    
+        let mut wrdt: [u8; 17] = [0; 17];
+        for i in 0..8 {
+            wrdt[i*2+1] = led_ptn[i];
+            wrdt[i*2+2] = 0;            
+        }
+        env.write_dt(Self::I2C_ADRS, &wrdt);
+    }
 }
