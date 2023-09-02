@@ -50,10 +50,16 @@ use usbd_midi::{
 static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
+static mut DELAY: Option<cortex_m::delay::Delay> = None;
 
 //*******************************************************************
 //          main
 //*******************************************************************
+unsafe fn delay_msec(time: u32) {
+    if let Some(dly) = DELAY.as_mut() {
+        dly.delay_ms(time);
+    }
+}
 #[interrupt]
 unsafe fn USBCTRL_IRQ() {
     if let Some(usb_dev) = USB_DEVICE.as_mut() {
@@ -84,7 +90,9 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    unsafe {
+        DELAY = Some(cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
+    }
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -130,7 +138,7 @@ fn main() -> ! {
     };
 
     ada.write_letter(&mut i2c, 1);
-    delay.delay_ms(2000);
+    unsafe{delay_msec(2000);}
     let mut count = 0;
 
     loop {
@@ -143,7 +151,7 @@ fn main() -> ! {
         ada.write_number(&mut i2c, count);
         count += 1;
         led_pin.set_high().unwrap();
-        delay.delay_ms(500);
+        unsafe{delay_msec(500);}
 
         info!("off!");
         output_midi_msg(Message::NoteOff(
@@ -153,7 +161,7 @@ fn main() -> ! {
         ));
         //ada.write_letter(&mut i2c, 2);
         led_pin.set_low().unwrap();
-        delay.delay_ms(500);
+        unsafe{delay_msec(500);}
     }
 }
 //*******************************************************************
