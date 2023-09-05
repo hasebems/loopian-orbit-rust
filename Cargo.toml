@@ -28,9 +28,10 @@ usbd-midi = "0.2.0"
 # rp2040-boot2 = "0.2"
 
 [features]
-default = ["ada88","Mbr3110"]
+default = ["ada88","Mbr3110","Pca9544"]
 ada88 = []
 Mbr3110 = []
+Pca9544 = []
 
 # cargo build/run
 [profile.dev]
