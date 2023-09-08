@@ -613,3 +613,49 @@ impl Pca9544 {
         env.write_dt(i2c_adrs, &i2c_buf);
     }
 }
+
+//-------------------------------------------------------------------------
+//			PCA9685 (LED Driver : I2c Device)
+//-------------------------------------------------------------------------
+#[cfg(feature = "Pca9685")]
+pub struct Pca9685;
+#[cfg(feature = "Pca9685")]     //	for LED Driver
+impl Pca9544 {
+    const PCA9685_ADDRESS: u8 = 0x40;
+    fn write(env: &mut I2cEnv, chip_number: u8, cmd1: u8, cmd2: u8) {
+        let i2c_buf: [u8; 2] = [cmd1, cmd2];
+        env.write_dt(Self::PCA9685_ADDRESS+chip_number, &i2c_buf);
+    }
+    //-------------------------------------------------------------------------
+    //		Initialize
+    //-------------------------------------------------------------------------
+    pub fn init(env: &mut I2cEnv, chip_number: u8) {
+        //	Init Parameter
+        Self::write(env, chip_number, 0x00, 0x00 );
+        Self::write(env, chip_number, 0x01, 0x12 );//	Invert, OE=high-impedance
+    }
+    //-------------------------------------------------------------------------
+    //		rNum, gNum, bNum : 0 - 4094  bigger, brighter
+    //-------------------------------------------------------------------------
+    pub fn set_fullcolor_led(env: &mut I2cEnv, chip_number: u8, mut led_num: u8, color: &[u16; 3]) {
+        let mut err = 0;
+        while led_num > 4 {
+            led_num -= 4;
+        }
+        for i in (0..3) {
+            //	figure out PWM counter
+            let mut color_cnt: u16 = color[i];
+            color_cnt = 4095 - color_cnt;
+            if color_cnt <= 0 { color_cnt = 1;}
+
+            //	Set PWM On Timing
+            let color_ofs: u8 = (i as u8)*4 + led_num*16;
+            let cmd2: u8 = (color_cnt & 0x00ff) as u8;
+            Self::write(env, chip_number, 0x06 + color_ofs, cmd2);
+            let cmd2: u8 = ((color_cnt & 0xff00)>>8) as u8;
+            Self::write(env, chip_number, 0x07 + color_ofs, cmd2);
+            Self::write(env, chip_number, 0x08 + color_ofs, 0 );
+            Self::write(env, chip_number, 0x09 + color_ofs, 0 );
+        }
+    }
+}
