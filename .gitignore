@@ -14,3 +14,4 @@ target/
 #!.vscode/settings.json
 
 .github/*
+.DS_Store

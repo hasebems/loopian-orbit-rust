@@ -18,27 +18,28 @@ mod i2c_device;
 use core::cell::RefCell;
 use core::ops::DerefMut;
 use cortex_m::interrupt::{free, Mutex};
-//use cortex_m_rt::entry;
 use cortex_m_rt::exception; // SysTick割り込み
 
+use rp_pico as bsp;
 use bsp::entry;
-use bsp::hal;
 use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::digital::v2::{InputPin, OutputPin, ToggleableOutputPin};
+use embedded_hal::digital::v2::{InputPin, OutputPin};
 use panic_probe as _;
-use rp_pico as bsp;
 
+use bsp::hal;
 use bsp::hal::{
-    clocks::{init_clocks_and_plls, Clock},
-    i2c::I2C,
+    clocks::init_clocks_and_plls,
     pac,
     pac::interrupt,
     sio::Sio,
     watchdog::Watchdog,
+    adc::Adc,
+    adc::AdcPin,
 };
+use cortex_m::prelude::_embedded_hal_adc_OneShot;
 
-use fugit::RateExtU32;
+//use fugit::RateExtU32;
 use i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544};
 
 // for USB MIDI
@@ -57,10 +58,8 @@ use usbd_midi::{
 static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
-//static mut DELAY: Option<cortex_m::delay::Delay> = None;
 
 const MAX_DEVICE_MBR3110: usize = 6;
-
 // 割り込みハンドラからハードウェア制御できるように、static変数にする
 // Mutex<RefCell<Option<共有変数>>> = Mutex::new(RefCell::new(None));
 static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0));
@@ -124,6 +123,11 @@ fn main() -> ! {
     let sw1_pin = pins.gpio14.into_pull_down_input();
     let setup_mode = sw1_pin.is_low().unwrap();
 
+    // Enable ADC
+    let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
+    // Configure GPIO26 as an ADC input
+    let mut adc_pin_0 = AdcPin::new(pins.gpio26);
+
     // SysTickの設定
     // 自前でSysTickを制御するときは cortex_m::delay::Delay が使えないので注意
     core.SYST.disable_counter();
@@ -135,14 +139,13 @@ fn main() -> ! {
     core.SYST.enable_counter();
 
     // I2C
-    let mut i2c = I2cEnv::set_i2cenv(I2C::i2c0(
+    let mut i2c = I2cEnv::set_i2cenv(
         pac.I2C0,
-        pins.gpio20.into_mode(), // sda
-        pins.gpio21.into_mode(), // scl
-        400_u32.kHz(),
+        pins.gpio20.into_function(),
+        pins.gpio21.into_function(),
         &mut pac.RESETS,
-        &clocks.system_clock,
-    ));
+        clocks.system_clock,
+    );
     Ada88::init(&mut i2c);
     Ada88::write_letter(&mut i2c, 0);
 
@@ -168,6 +171,7 @@ fn main() -> ! {
         }
     };
 
+    // Application Setup mode
     let mut available_each_device = [true; MAX_DEVICE_MBR3110];
     if setup_mode {
         Ada88::write_letter(&mut i2c, 21);
@@ -211,7 +215,8 @@ fn main() -> ! {
             time += 1;
         }
 
-        Ada88::write_number(&mut i2c, time);
+        let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();        
+        Ada88::write_number(&mut i2c, pin_adc_counts as i16);
         if ev {
             if time % 2 == 0 {
                 info!("on!");

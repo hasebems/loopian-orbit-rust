@@ -1,3 +1,4 @@
+use bsp::hal::clocks::ClocksManager;
 //  Created by Hasebe Masahiko on 2023/08/22.
 //  Copyright (c) 2023 Hasebe Masahiko.
 //  Released under the MIT license
@@ -10,12 +11,14 @@ use embedded_hal::prelude::_embedded_hal_blocking_i2c_WriteRead;
 use panic_probe as _;
 
 use crate::delay_msec;
-use bsp::hal::{
-    gpio::pin::{bank0::*, FunctionI2C, Pin},
-    i2c::I2C,
-    pac::I2C0,
-};
 use rp_pico as bsp;
+use bsp::hal::{
+    gpio::{bank0::*, Pin, FunctionI2C, PullDown},
+    i2c::I2C,
+    pac::{Peripherals, I2C0, RESETS},
+    clocks::SystemClock,
+};
+use fugit::RateExtU32;
 
 use crate::MAX_DEVICE_MBR3110;
 
@@ -26,13 +29,25 @@ type SDAPin = Gpio20;
 type SCLPin = Gpio21;
 
 pub struct I2cEnv {
-    i2c_env: I2C<I2C0, (Pin<SDAPin, FunctionI2C>, Pin<SCLPin, FunctionI2C>)>,
+    i2c_env: I2C<I2C0, (Pin<SDAPin,FunctionI2C,PullDown>, Pin<SCLPin,FunctionI2C,PullDown>)>,
 }
 impl I2cEnv {
     pub fn set_i2cenv(
-        i2c_env: I2C<I2C0, (Pin<SDAPin, FunctionI2C>, Pin<SCLPin, FunctionI2C>)>,
+        i2c: I2C0,
+        sda: Pin<SDAPin,FunctionI2C,PullDown>,
+        scl: Pin<SCLPin,FunctionI2C,PullDown>,
+        resets: &mut RESETS,
+        sys_clocks: SystemClock,
     ) -> Self {
-        Self { i2c_env }
+        let i2c_env = I2C::i2c0(
+            i2c,
+            sda,
+            scl,
+            400_u32.kHz(),
+            resets,
+            &sys_clocks,
+        );
+        Self {i2c_env}
     }
     pub fn write_dt(&mut self, adrs: u8, dt: &[u8]) {
         match self.i2c_env.write(adrs, dt) {

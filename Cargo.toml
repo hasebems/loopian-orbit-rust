@@ -15,7 +15,7 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 fugit = "0.3.7"
 
 # We're using a Pico by default on this template
-rp-pico = "0.7"
+rp-pico = "0.8.0"
 
 usb-device = "0.2.8"
 usbd-midi = "0.2.0"
@@ -24,7 +24,7 @@ usbd-midi = "0.2.0"
 # sparkfun-pro-micro-rp2040 = "0.6"
 
 # If you're not going to use a Board Support Package you'll need these:
-# rp2040-hal = { version="0.8", features=["rt", "critical-section-impl"] }
+# rp2040-hal = { version="0.9.0", features=["rt", "critical-section-impl"] }
 # rp2040-boot2 = "0.2"
 
 [features]
