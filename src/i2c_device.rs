@@ -1,4 +1,3 @@
-use bsp::hal::clocks::ClocksManager;
 //  Created by Hasebe Masahiko on 2023/08/22.
 //  Copyright (c) 2023 Hasebe Masahiko.
 //  Released under the MIT license
@@ -15,7 +14,7 @@ use rp_pico as bsp;
 use bsp::hal::{
     gpio::{bank0::*, Pin, FunctionI2C, PullDown},
     i2c::I2C,
-    pac::{Peripherals, I2C0, RESETS},
+    pac::{I2C0, RESETS},
     clocks::SystemClock,
 };
 use fugit::RateExtU32;
@@ -638,11 +637,10 @@ impl Pca9544 {
     //		rNum, gNum, bNum : 0 - 4094  bigger, brighter
     //-------------------------------------------------------------------------
     pub fn set_fullcolor_led(env: &mut I2cEnv, chip_number: u8, mut led_num: u8, color: &[u16; 3]) {
-        let mut err = 0;
         while led_num > 4 {
             led_num -= 4;
         }
-        for i in (0..3) {
+        for i in 0..3 {
             //	figure out PWM counter
             let mut color_cnt: u16 = color[i];
             color_cnt = 4095 - color_cnt;

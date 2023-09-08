@@ -6,15 +6,12 @@
 #![no_std]
 #![no_main]
 
+mod lpn_chore;
 mod i2c_device;
 
 //*******************************************************************
 //          USE
 //*******************************************************************
-// Provide an alias for our BSP so we can switch targets quickly.
-// Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
-//use crate::hal::gpio::bank0::Gpio25;
-//use crate::hal::gpio::PushPullOutput;
 use core::cell::RefCell;
 use core::ops::DerefMut;
 use cortex_m::interrupt::{free, Mutex};
@@ -39,9 +36,6 @@ use bsp::hal::{
 };
 use cortex_m::prelude::_embedded_hal_adc_OneShot;
 
-//use fugit::RateExtU32;
-use i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544};
-
 // for USB MIDI
 use usb_device::{class_prelude::*, prelude::*};
 use usbd_midi::data::midi::{channel::Channel, message::Message, notes::Note};
@@ -52,6 +46,10 @@ use usbd_midi::{
     data::byte::from_traits::FromClamped, data::usb::constants::USB_CLASS_NONE,
     midi_device::MidiClass,
 };
+
+use i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544};
+use lpn_chore::LoopClock;
+
 //*******************************************************************
 //          Global Variable/DEF
 //*******************************************************************
@@ -134,7 +132,7 @@ fn main() -> ! {
     core.SYST.clear_current();
     // set_reloadで設定する値は、(割り込み周期のクロック数 - 1)
     // Raspberry Pi Picoでは、1クロック=1マイクロ秒。
-    core.SYST.set_reload(1_000 - 1); // 1m秒周期
+    core.SYST.set_reload(1_000 - 1); // 1msec周期
     core.SYST.enable_interrupt();
     core.SYST.enable_counter();
 
@@ -201,24 +199,19 @@ fn main() -> ! {
     }
     exledsw_pin.set_low().unwrap();
 
-    let mut count: u32 = 0;
-    let mut count_old: u32 = 0;
-    let mut time: i16 = 0;
+    // Main Loop Clock
+    let mut lpclk = LoopClock::init();
 
     loop {
         free(|cs| {
-            count = *COUNTER.borrow(cs).borrow();
+            lpclk.set_clock(*COUNTER.borrow(cs).borrow());
         });
-        let ev = count - count_old >= 1000;
-        if ev {
-            count_old = count;
-            time += 1;
-        }
+        let ev1s = lpclk.event_1s();
 
         let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();        
         Ada88::write_number(&mut i2c, pin_adc_counts as i16);
-        if ev {
-            if time % 2 == 0 {
+        if ev1s {
+            if (lpclk.get_ms()/1000) % 2 == 0 {
                 info!("on!");
                 output_midi_msg(Message::NoteOn(
                     Channel::Channel1,
