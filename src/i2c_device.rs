@@ -10,14 +10,14 @@ use embedded_hal::prelude::_embedded_hal_blocking_i2c_WriteRead;
 use panic_probe as _;
 
 use crate::delay_msec;
-use rp_pico as bsp;
 use bsp::hal::{
-    gpio::{bank0::*, Pin, FunctionI2C, PullDown},
+    clocks::SystemClock,
+    gpio::{bank0::*, FunctionI2C, Pin, PullDown},
     i2c::I2C,
     pac::{I2C0, RESETS},
-    clocks::SystemClock,
 };
 use fugit::RateExtU32;
+use rp_pico as bsp;
 
 use crate::MAX_DEVICE_MBR3110;
 
@@ -28,25 +28,24 @@ type SDAPin = Gpio20;
 type SCLPin = Gpio21;
 
 pub struct I2cEnv {
-    i2c_env: I2C<I2C0, (Pin<SDAPin,FunctionI2C,PullDown>, Pin<SCLPin,FunctionI2C,PullDown>)>,
+    i2c_env: I2C<
+        I2C0,
+        (
+            Pin<SDAPin, FunctionI2C, PullDown>,
+            Pin<SCLPin, FunctionI2C, PullDown>,
+        ),
+    >,
 }
 impl I2cEnv {
     pub fn set_i2cenv(
         i2c: I2C0,
-        sda: Pin<SDAPin,FunctionI2C,PullDown>,
-        scl: Pin<SCLPin,FunctionI2C,PullDown>,
+        sda: Pin<SDAPin, FunctionI2C, PullDown>,
+        scl: Pin<SCLPin, FunctionI2C, PullDown>,
         resets: &mut RESETS,
         sys_clocks: SystemClock,
     ) -> Self {
-        let i2c_env = I2C::i2c0(
-            i2c,
-            sda,
-            scl,
-            400_u32.kHz(),
-            resets,
-            &sys_clocks,
-        );
-        Self {i2c_env}
+        let i2c_env = I2C::i2c0(i2c, sda, scl, 400_u32.kHz(), resets, &sys_clocks);
+        Self { i2c_env }
     }
     pub fn write_dt(&mut self, adrs: u8, dt: &[u8]) {
         match self.i2c_env.write(adrs, dt) {
@@ -375,7 +374,8 @@ impl Mbr3110 {
         Ok(rd_dt[0])
     }
     //-------------------------------------------------------------------------
-    pub fn _change_sensitivity(env: &mut I2cEnv, data: u8, number: usize) { //	data : 0-3
+    pub fn _change_sensitivity(env: &mut I2cEnv, data: u8, number: usize) {
+        //	data : 0-3
         let mut reg_data2 = data & 0x03;
         reg_data2 |= reg_data2 << 2;
         let reg_data4 = reg_data2 | (reg_data2 << 4);
@@ -389,7 +389,7 @@ impl Mbr3110 {
         env.write_dt(i2c_adrs, &i2c_data);
     }
     //-------------------------------------------------------------------------
-    pub fn _read_touch_sw(env: &mut I2cEnv, number: usize) -> Result<[u8; 2], i32> {
+    pub fn read_touch_sw(env: &mut I2cEnv, number: usize) -> Result<[u8; 2], i32> {
         let rd_dt = env.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]);
         Ok(rd_dt)
     }
@@ -618,25 +618,30 @@ impl Pca9544 {
 //-------------------------------------------------------------------------
 #[cfg(feature = "Pca9685")]
 pub struct Pca9685;
-#[cfg(feature = "Pca9685")]     //	for LED Driver
-impl Pca9544 {
+#[cfg(feature = "Pca9685")] //	for LED Driver
+impl Pca9685 {
     const PCA9685_ADDRESS: u8 = 0x40;
-    fn write(env: &mut I2cEnv, chip_number: u8, cmd1: u8, cmd2: u8) {
+    pub fn write(env: &mut I2cEnv, chip_number: usize, cmd1: u8, cmd2: u8) {
         let i2c_buf: [u8; 2] = [cmd1, cmd2];
-        env.write_dt(Self::PCA9685_ADDRESS+chip_number, &i2c_buf);
+        env.write_dt(Self::PCA9685_ADDRESS + chip_number as u8, &i2c_buf);
     }
     //-------------------------------------------------------------------------
     //		Initialize
     //-------------------------------------------------------------------------
-    pub fn init(env: &mut I2cEnv, chip_number: u8) {
+    pub fn init(env: &mut I2cEnv, chip_number: usize) {
         //	Init Parameter
-        Self::write(env, chip_number, 0x00, 0x00 );
-        Self::write(env, chip_number, 0x01, 0x12 );//	Invert, OE=high-impedance
+        Self::write(env, chip_number, 0x00, 0x00);
+        Self::write(env, chip_number, 0x01, 0x12); //	Invert, OE=high-impedance
     }
     //-------------------------------------------------------------------------
     //		rNum, gNum, bNum : 0 - 4094  bigger, brighter
     //-------------------------------------------------------------------------
-    pub fn set_fullcolor_led(env: &mut I2cEnv, chip_number: u8, mut led_num: u8, color: &[u16; 3]) {
+    pub fn set_fullcolor_led(
+        env: &mut I2cEnv,
+        chip_number: usize,
+        mut led_num: u8,
+        color: &[u16; 3],
+    ) {
         while led_num > 4 {
             led_num -= 4;
         }
@@ -644,16 +649,18 @@ impl Pca9544 {
             //	figure out PWM counter
             let mut color_cnt: u16 = color[i];
             color_cnt = 4095 - color_cnt;
-            if color_cnt <= 0 { color_cnt = 1;}
+            if color_cnt <= 0 {
+                color_cnt = 1;
+            }
 
             //	Set PWM On Timing
-            let color_ofs: u8 = (i as u8)*4 + led_num*16;
+            let color_ofs: u8 = (i as u8) * 4 + led_num * 16;
             let cmd2: u8 = (color_cnt & 0x00ff) as u8;
             Self::write(env, chip_number, 0x06 + color_ofs, cmd2);
-            let cmd2: u8 = ((color_cnt & 0xff00)>>8) as u8;
+            let cmd2: u8 = ((color_cnt & 0xff00) >> 8) as u8;
             Self::write(env, chip_number, 0x07 + color_ofs, cmd2);
-            Self::write(env, chip_number, 0x08 + color_ofs, 0 );
-            Self::write(env, chip_number, 0x09 + color_ofs, 0 );
+            Self::write(env, chip_number, 0x08 + color_ofs, 0);
+            Self::write(env, chip_number, 0x09 + color_ofs, 0);
         }
     }
 }

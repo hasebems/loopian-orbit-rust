@@ -6,8 +6,8 @@
 #![no_std]
 #![no_main]
 
-mod lpn_chore;
 mod i2c_device;
+mod lpn_chore;
 
 //*******************************************************************
 //          USE
@@ -17,22 +17,17 @@ use core::ops::DerefMut;
 use cortex_m::interrupt::{free, Mutex};
 use cortex_m_rt::exception; // SysTick割り込み
 
-use rp_pico as bsp;
 use bsp::entry;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use panic_probe as _;
+use rp_pico as bsp;
 
 use bsp::hal;
 use bsp::hal::{
-    clocks::init_clocks_and_plls,
-    pac,
-    pac::interrupt,
-    sio::Sio,
+    adc::Adc, adc::AdcPin, clocks::init_clocks_and_plls, pac, pac::interrupt, sio::Sio,
     watchdog::Watchdog,
-    adc::Adc,
-    adc::AdcPin,
 };
 use cortex_m::prelude::_embedded_hal_adc_OneShot;
 
@@ -47,8 +42,10 @@ use usbd_midi::{
     midi_device::MidiClass,
 };
 
-use i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544};
-use lpn_chore::LoopClock;
+use i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544, Pca9685};
+use lpn_chore::{
+    DetectPosition, LoopClock, PositionLed, SwitchEvent, MAX_DEVICE_MBR3110, MAX_ELECTRODE_PER_DEV,
+};
 
 //*******************************************************************
 //          Global Variable/DEF
@@ -57,7 +54,8 @@ static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
 
-const MAX_DEVICE_MBR3110: usize = 6;
+static I2C_CONCLETE: Mutex<RefCell<Option<I2cEnv>>> = Mutex::new(RefCell::new(None));
+
 // 割り込みハンドラからハードウェア制御できるように、static変数にする
 // Mutex<RefCell<Option<共有変数>>> = Mutex::new(RefCell::new(None));
 static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0));
@@ -115,7 +113,7 @@ fn main() -> ! {
 
     // GPIO
     let mut led_pin = pins.led.into_push_pull_output();
-    let mut exledsw_pin = pins.gpio15.into_push_pull_output();
+    let mut exled_2_pin = pins.gpio15.into_push_pull_output();
     let mut exled_err_pin = pins.gpio16.into_push_pull_output();
     let mut exled_1_pin = pins.gpio17.into_push_pull_output();
     let sw1_pin = pins.gpio14.into_pull_down_input();
@@ -137,15 +135,21 @@ fn main() -> ! {
     core.SYST.enable_counter();
 
     // I2C
-    let mut i2c = I2cEnv::set_i2cenv(
-        pac.I2C0,
-        pins.gpio20.into_function(),
-        pins.gpio21.into_function(),
-        &mut pac.RESETS,
-        clocks.system_clock,
-    );
-    Ada88::init(&mut i2c);
-    Ada88::write_letter(&mut i2c, 0);
+    free(|cs| {
+        let mut i2c = I2cEnv::set_i2cenv(
+            pac.I2C0,
+            pins.gpio20.into_function(),
+            pins.gpio21.into_function(),
+            &mut pac.RESETS,
+            clocks.system_clock,
+        );
+        Ada88::init(&mut i2c);
+        Ada88::write_letter(&mut i2c, 0);
+        for i in 0..MAX_DEVICE_MBR3110 {
+            Pca9685::init(&mut i2c, i);
+        }
+        *I2C_CONCLETE.borrow(cs).borrow_mut() = Some(i2c);
+    });
 
     // USB MIDI
     unsafe {
@@ -172,46 +176,102 @@ fn main() -> ! {
     // Application Setup mode
     let mut available_each_device = [true; MAX_DEVICE_MBR3110];
     if setup_mode {
-        Ada88::write_letter(&mut i2c, 21);
-        exledsw_pin.set_high().unwrap();
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                Ada88::write_letter(i2c, 21);
+            }
+        });
+        exled_2_pin.set_high().unwrap();
         check_and_setup_board();
         // 戻ってこない
     } else {
         // Normal Mode
         let mut exist_err = false;
         for i in 0..MAX_DEVICE_MBR3110 {
-            Pca9544::change_i2cbus(&mut i2c, 0, i);
-            let err = Mbr3110::init(&mut i2c, i);
-            if err != 0 {
-                available_each_device[i] = false;
-                exist_err = true;
-            }
+            free(|cs| {
+                if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                    Pca9544::change_i2cbus(i2c, 0, i);
+                    let err = Mbr3110::init(i2c, i);
+                    if err != 0 {
+                        available_each_device[i] = false;
+                        exist_err = true;
+                    }
+                }
+            });
         }
+        let disp_num: usize;
         if exist_err {
-            // Error
             exled_err_pin.set_high().unwrap();
-            Ada88::write_letter(&mut i2c, 23);
+            disp_num = 23; // Error
         } else {
-            // OK
-            Ada88::write_letter(&mut i2c, 22);
+            disp_num = 22; // OK
         }
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                Ada88::write_letter(i2c, disp_num);
+            }
+        });
         delay_msec(3000);
     }
-    exledsw_pin.set_low().unwrap();
+    exled_2_pin.set_low().unwrap();
 
-    // Main Loop Clock
+    // Initialize Variables
     let mut lpclk = LoopClock::init();
+    let mut swevt = SwitchEvent::init();
+    let mut dtct = DetectPosition::init();
+    let mut pled = PositionLed::init();
 
     loop {
         free(|cs| {
             lpclk.set_clock(*COUNTER.borrow(cs).borrow());
         });
         let ev1s = lpclk.event_1s();
+        let ev10ms = lpclk.event_10ms();
+        let tm = lpclk.get_ms();
 
-        let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();        
-        Ada88::write_number(&mut i2c, pin_adc_counts as i16);
+        if ev10ms {
+            let mut light_someone = false;
+            for i in 0..MAX_DEVICE_MBR3110 {
+                if available_each_device[i] {
+                    free(|cs| {
+                        if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                            Pca9544::change_i2cbus(i2c, 0, i);
+                            match Mbr3110::read_touch_sw(i2c, i) {
+                                Ok(sw) => {
+                                    let bptn: u16 = (sw[0] as u16) << 8 + (sw[1] as u16);
+                                    for j in 0..MAX_ELECTRODE_PER_DEV {
+                                        if (bptn & (0x0001 << j)) != 0 {
+                                            swevt.set_event(tm, i, j);
+                                            light_someone = true;
+                                        } else {
+                                            swevt.clear_event(tm, i, j);
+                                        }
+                                    }
+                                }
+                                Err(_err) => info!("Error!"),
+                            }
+                        }
+                    });
+                }
+            }
+            if light_someone {
+                exled_2_pin.set_low().unwrap();
+            } else {
+                exled_2_pin.set_high().unwrap();
+            }
+            dtct.update_touch_position();
+        }
+
+        let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                Ada88::write_number(i2c, pin_adc_counts as i16);
+            }
+        });
+        pled.gen_lighting_in_loop(tm);
+
         if ev1s {
-            if (lpclk.get_ms()/1000) % 2 == 0 {
+            if (lpclk.get_ms() / 1000) % 2 == 0 {
                 info!("on!");
                 output_midi_msg(Message::NoteOn(
                     Channel::Channel1,
