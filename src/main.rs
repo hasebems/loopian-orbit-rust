@@ -113,11 +113,16 @@ fn main() -> ! {
 
     // GPIO
     let mut led_pin = pins.led.into_push_pull_output();
-    let mut exled_2_pin = pins.gpio15.into_push_pull_output();
+    let mut whiteled_sw_pin = pins.gpio15.into_push_pull_output();
     let mut exled_err_pin = pins.gpio16.into_push_pull_output();
     let mut exled_1_pin = pins.gpio17.into_push_pull_output();
+    let mut exled_2_pin = pins.gpio18.into_push_pull_output();
     let sw1_pin = pins.gpio14.into_pull_down_input();
     let setup_mode = sw1_pin.is_low().unwrap();
+    whiteled_sw_pin.set_high().unwrap(); // Touch部白色LEDの Mute
+    exled_err_pin.set_high().unwrap();  // 消灯
+    exled_1_pin.set_high().unwrap();    // 消灯
+    exled_2_pin.set_high().unwrap();    // 消灯
 
     // Enable ADC
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
@@ -146,7 +151,9 @@ fn main() -> ! {
         Ada88::init(&mut i2c);
         Ada88::write_letter(&mut i2c, 0);
         for i in 0..MAX_DEVICE_MBR3110 {
-            Pca9685::init(&mut i2c, i);
+            Pca9544::change_i2cbus(&mut i2c, 3, i);
+            Pca9685::init(&mut i2c, 0);
+            Pca9544::change_i2cbus(&mut i2c, 1, i);
         }
         *I2C_CONCLETE.borrow(cs).borrow_mut() = Some(i2c);
     });
@@ -181,12 +188,12 @@ fn main() -> ! {
                 Ada88::write_letter(i2c, 21);
             }
         });
-        exled_2_pin.set_high().unwrap();
+        exled_err_pin.set_low().unwrap();
         check_and_setup_board();
         // 戻ってこない
     } else {
         // Normal Mode
-        let mut exist_err = false;
+        let mut exist_err = 0;
         for i in 0..MAX_DEVICE_MBR3110 {
             free(|cs| {
                 if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
@@ -194,15 +201,16 @@ fn main() -> ! {
                     let err = Mbr3110::init(i2c, i);
                     if err != 0 {
                         available_each_device[i] = false;
-                        exist_err = true;
+                        exist_err = err;
                     }
                 }
             });
         }
-        let disp_num: usize;
-        if exist_err {
-            exled_err_pin.set_high().unwrap();
-            disp_num = 23; // Error
+        let mut disp_num: usize;
+        if exist_err != 0 {
+            exled_err_pin.set_low().unwrap();
+            disp_num = 9 + exist_err as usize; // Error: AF,BF,CF ...
+            if disp_num >= 23 { disp_num = 23;}
         } else {
             disp_num = 22; // OK
         }
@@ -213,7 +221,6 @@ fn main() -> ! {
         });
         delay_msec(3000);
     }
-    exled_2_pin.set_low().unwrap();
 
     // Initialize Variables
     let mut lpclk = LoopClock::init();
@@ -221,7 +228,12 @@ fn main() -> ! {
     let mut pled = PositionLed::init();
     let mut swevt: [SwitchEvent; MAX_DEVICE_MBR3110] = Default::default();
 
+    // Touch部白色LEDの Mute 解除
+    whiteled_sw_pin.set_low().unwrap();
+
     loop {
+        exled_1_pin.set_high().unwrap();    //test
+
         free(|cs| {
             lpclk.set_clock(*COUNTER.borrow(cs).borrow());
         });
@@ -230,7 +242,7 @@ fn main() -> ! {
         let tm = lpclk.get_ms();
 
         if ev10ms {
-            let mut light_someone = false;
+            let mut touch_someone = false;
             for i in 0..MAX_DEVICE_MBR3110 {
                 if available_each_device[i] {
                     free(|cs| {
@@ -238,21 +250,27 @@ fn main() -> ! {
                             Pca9544::change_i2cbus(i2c, 0, i);
                             match Mbr3110::read_touch_sw(i2c, i) {
                                 Ok(sw) => {
-                                    light_someone = swevt[i].update_sw_event(sw, tm);
+                                    touch_someone = (sw[0] != 0) || (sw[1] != 0);
+                                    //touch_someone = swevt[i].update_sw_event(sw, tm);
                                 }
-                                Err(_err) => info!("Error!"),
+                                Err(_err) => {
+                                    info!("Error!");
+                                    exled_err_pin.set_low().unwrap();
+                                },
                             }
                         }
                     });
                 }
             }
-            if light_someone {
+            if touch_someone {
                 exled_2_pin.set_low().unwrap();
             } else {
                 exled_2_pin.set_high().unwrap();
             }
             dtct.update_touch_position();
         }
+
+        exled_1_pin.set_low().unwrap();// test
 
         let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
         free(|cs| {
@@ -272,7 +290,6 @@ fn main() -> ! {
                 ));
                 //count += 1;
                 led_pin.set_high().unwrap();
-                exled_1_pin.set_high().unwrap();
             } else {
                 info!("off!");
                 output_midi_msg(Message::NoteOff(
@@ -281,7 +298,6 @@ fn main() -> ! {
                     FromClamped::from_clamped(64),
                 ));
                 led_pin.set_low().unwrap();
-                exled_1_pin.set_low().unwrap();
             }
         }
     }

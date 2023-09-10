@@ -162,12 +162,16 @@ impl PositionLed {
       return max_ev;
     }*/
     fn one_kamaboco(&mut self, dev_num: usize) {
-        let divieded_time = (self.total_time/5) as u16;
+        const MIN_DIFF: u16 = 4;
+        const MAX_STR: u16 = (MAX_EACH_LIGHT as u16)*MIN_DIFF; // 64
+        const HALF_STR: u16 = MAX_STR/2; // 32
+        const BG_SPEED: u32 = 10;   // smaller, faster
 
+        let divieded_time = ((self.total_time/BG_SPEED)%(MAX_STR as u32)) as u16;
         for i in 0..MAX_EACH_LIGHT {
           // 背景で薄く光っている
-          let mut ptn: u16 = (divieded_time+(4*(i as u16)))%64;
-          if ptn >= 32 {ptn = 64-ptn;}
+          let mut ptn: u16 = (divieded_time+(MIN_DIFF*(i as u16)))%MAX_STR;
+          if ptn >= HALF_STR {ptn = MAX_STR-ptn;}
           Self::light_led_each(i, dev_num, ptn);
         }
     }

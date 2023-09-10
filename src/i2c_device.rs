@@ -636,7 +636,7 @@ impl Pca9685 {
     //-------------------------------------------------------------------------
     //		rNum, gNum, bNum : 0 - 4094  bigger, brighter
     //-------------------------------------------------------------------------
-    pub fn set_fullcolor_led(
+    pub fn _set_fullcolor_led(
         env: &mut I2cEnv,
         chip_number: usize,
         mut led_num: u8,
