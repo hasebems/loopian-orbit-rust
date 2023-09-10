@@ -217,9 +217,9 @@ fn main() -> ! {
 
     // Initialize Variables
     let mut lpclk = LoopClock::init();
-    let mut swevt = SwitchEvent::init();
     let mut dtct = DetectPosition::init();
     let mut pled = PositionLed::init();
+    let mut swevt: [SwitchEvent; MAX_DEVICE_MBR3110] = Default::default();
 
     loop {
         free(|cs| {
@@ -238,15 +238,7 @@ fn main() -> ! {
                             Pca9544::change_i2cbus(i2c, 0, i);
                             match Mbr3110::read_touch_sw(i2c, i) {
                                 Ok(sw) => {
-                                    let bptn: u16 = (sw[0] as u16) << 8 + (sw[1] as u16);
-                                    for j in 0..MAX_ELECTRODE_PER_DEV {
-                                        if (bptn & (0x0001 << j)) != 0 {
-                                            swevt.set_event(tm, i, j);
-                                            light_someone = true;
-                                        } else {
-                                            swevt.clear_event(tm, i, j);
-                                        }
-                                    }
+                                    light_someone = swevt[i].update_sw_event(sw, tm);
                                 }
                                 Err(_err) => info!("Error!"),
                             }

@@ -70,41 +70,37 @@ impl LoopClock {
 //*******************************************************************
 //          Switch Event
 //*******************************************************************
+#[derive(Default)]
 pub struct SwitchEvent {
-    sw: [u32; MAX_DEVICE_MBR3110 * MAX_ELECTRODE_PER_DEV],
+    sw: [u32; MAX_ELECTRODE_PER_DEV],
 }
 impl SwitchEvent {
-    pub fn init() -> Self {
+    pub fn _init() -> Self {
         Self {
-            sw: [0; MAX_DEVICE_MBR3110 * MAX_ELECTRODE_PER_DEV],
+            sw: [0; MAX_ELECTRODE_PER_DEV],
         }
     }
-    pub fn set_event(&mut self, time: u32, dev: usize, ele: usize) {
-        if dev >= MAX_DEVICE_MBR3110 {
+    fn clear_event(&mut self, time: u32, ele: usize) {
+        if self.sw[ele] == 0 {
             return;
         }
-        if ele >= MAX_ELECTRODE_PER_DEV {
-            return;
+        if self.sw[ele] + 5 < time {
+            self.sw[ele] = 0;
         }
-        if time == 0 {
-            return;
-        }
-        self.sw[dev * ele] = time;
     }
-    pub fn clear_event(&mut self, time: u32, dev: usize, ele: usize) {
-        if dev >= MAX_DEVICE_MBR3110 {
-            return;
+    pub fn update_sw_event(&mut self, sw: [u8;2], tm: u32) -> bool {
+        if tm == 0 {return false;}
+        let mut light_someone = false;
+        let bptn: u16 = (sw[0] as u16) << 8 + (sw[1] as u16);
+        for j in 0..MAX_ELECTRODE_PER_DEV {
+            if (bptn & (0x0001 << j)) != 0 {
+                self.sw[j] = tm;
+                light_someone = true;
+            } else {
+                self.clear_event(tm, j);
+            }
         }
-        if ele >= MAX_ELECTRODE_PER_DEV {
-            return;
-        }
-        let idx = dev * ele;
-        if self.sw[idx] == 0 {
-            return;
-        }
-        if self.sw[idx] + 5 < time {
-            self.sw[idx] = 0;
-        }
+        light_someone
     }
 }
 //*******************************************************************
