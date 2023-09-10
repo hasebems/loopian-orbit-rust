@@ -106,30 +106,30 @@ impl SwitchEvent {
 //*******************************************************************
 //          Position LED
 //*******************************************************************
-pub struct PositionLed;
+pub struct PositionLed {
+    total_time: u32,
+}
 impl PositionLed {
     pub fn init() -> Self {
         Self::clear_all();
-        Self {}
+        Self {
+            total_time: 0,
+        }
     }
     pub fn clear_all() {
         for i in 0..MAX_DEVICE_MBR3110 {
-            free(|cs| {
-                if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
-                    Pca9544::change_i2cbus(i2c, 3, i);
-                }
-            });
             for j in 0..MAX_EACH_LIGHT {
-                Self::light_led_each(j as u8, 0);
+                Self::light_led_each(j, i, 0);
             }
-            free(|cs| {
-                if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
-                    Pca9544::change_i2cbus(i2c, 1, i);
-                }
-            });
         }
     }
-    pub fn gen_lighting_in_loop(&mut self, tm: u32) {}
+    pub fn gen_lighting_in_loop(&mut self, tm: u32) {
+        self.total_time = tm;
+        for j in 0..MAX_DEVICE_MBR3110 {
+            self.one_kamaboco(j);
+        }
+        //if (_fade_counter == 0){_fade_counter = 1;}  
+    }
     /*
     int WhiteLed::gen_lighting_in_loop(long difftm, int (&tchev)[MAX_TOUCH_EV])
     {
@@ -160,9 +160,18 @@ impl PositionLed {
       if (_fade_counter == 0){_fade_counter = 1;}
 
       return max_ev;
+    }*/
+    fn one_kamaboco(&mut self, dev_num: usize) {
+        let divieded_time = (self.total_time/5) as u16;
+
+        for i in 0..MAX_EACH_LIGHT {
+          // 背景で薄く光っている
+          let mut ptn: u16 = (divieded_time+(4*(i as u16)))%64;
+          if ptn >= 32 {ptn = 64-ptn;}
+          Self::light_led_each(i, dev_num, ptn);
+        }
     }
-    void WhiteLed::one_kamaboco(int kamanum)
-    {
+    /*{
       uint16_t time = static_cast<uint16_t>(_total_time/5);
       const int offset_num = kamanum*MAX_EACH_LIGHT;
       pca9544_changeI2cBus(3,kamanum);
@@ -186,18 +195,21 @@ impl PositionLed {
       }
       pca9544_changeI2cBus(1,kamanum); // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
     }*/
-    fn light_led_each(num: u8, mut strength: u16) {
+    fn light_led_each(num: usize, dev_num: usize, mut strength: u16) {
         // strength=0-4095
-        let adrs = num * 4 + 0x06;
+        let adrs = (num as u8)* 4 + 0x06;
         if strength > 4000 {
             strength = 4000;
         }
         free(|cs| {
             if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                Pca9544::change_i2cbus(i2c, 3, dev_num);
                 Pca9685::write(i2c, 0, adrs, 0); // ONはtime=0
                 Pca9685::write(i2c, 0, adrs + 1, 0); // ONはtime=0
                 Pca9685::write(i2c, 0, adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
                 Pca9685::write(i2c, 0, adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
+                // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
+                Pca9544::change_i2cbus(i2c, 1, dev_num);
             }
         });
     }
