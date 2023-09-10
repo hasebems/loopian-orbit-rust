@@ -4,12 +4,14 @@
 //  https://opensource.org/licenses/mit-license.php
 //
 use crate::i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544, Pca9685};
-use crate::I2C_CONCLETE;
+//use crate::I2C_CONCLETE;
 use cortex_m::interrupt::{free, Mutex};
 
 pub const MAX_DEVICE_MBR3110: usize = 6;
 pub const MAX_ELECTRODE_PER_DEV: usize = 8;
 pub const MAX_EACH_LIGHT: usize = 16;
+
+//use crate::delay_msec;
 
 //*******************************************************************
 //          Loop Clock
@@ -205,17 +207,13 @@ impl PositionLed {
         if strength > 4000 {
             strength = 4000;
         }
-        free(|cs| {
-            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
-                Pca9544::change_i2cbus(i2c, 3, dev_num);
-                Pca9685::write(i2c, 0, adrs, 0); // ONはtime=0
-                Pca9685::write(i2c, 0, adrs + 1, 0); // ONはtime=0
-                Pca9685::write(i2c, 0, adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
-                Pca9685::write(i2c, 0, adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
-                // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
-                Pca9544::change_i2cbus(i2c, 1, dev_num);
-            }
-        });
+        Pca9544::change_i2cbus(3, dev_num);
+        Pca9685::write(0, adrs, 0); // ONはtime=0
+        Pca9685::write(0, adrs + 1, 0); // ONはtime=0
+        Pca9685::write(0, adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
+        Pca9685::write(0, adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
+        // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
+        Pca9544::change_i2cbus(1, dev_num);
     }
 }
 //*******************************************************************

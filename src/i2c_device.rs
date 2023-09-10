@@ -21,6 +21,11 @@ use rp_pico as bsp;
 
 use crate::MAX_DEVICE_MBR3110;
 
+use core::cell::RefCell;
+use cortex_m::interrupt::{free, Mutex};
+
+static I2C_CONCLETE: Mutex<RefCell<Option<I2cEnv>>> = Mutex::new(RefCell::new(None));
+
 //*******************************************************************
 //          I2C Environment
 //*******************************************************************
@@ -63,6 +68,25 @@ impl I2cEnv {
             _ => return Some(readbuf),
         }        
     }
+}
+
+pub fn i2c_init(
+    i2cn: I2C0,
+    sda: Pin<SDAPin, FunctionI2C, PullDown>,
+    scl: Pin<SCLPin, FunctionI2C, PullDown>,
+    resets: &mut RESETS,
+    sys_clocks: SystemClock,    
+) {
+    free(|cs| {
+        let mut i2cc = I2cEnv::set_i2cenv(
+            i2cn,
+            sda,
+            scl,
+            resets,
+            sys_clocks,
+        );
+        *I2C_CONCLETE.borrow(cs).borrow_mut() = Some(i2cc);
+    });
 }
 //*******************************************************************
 //          I2C device Access IF
@@ -288,14 +312,20 @@ pub struct Mbr3110;
 #[cfg(feature = "Mbr3110")]
 impl Mbr3110 {
     //-------------------------------------------------------------------------
-    fn reset(env: &mut I2cEnv, i2c_adrs: u8) {
+    fn reset(i2c_adrs: u8) {
         let i2c_data: [u8; 2] = [CTRL_CMD, POWER_ON_AND_FINISHED];
         delay_msec(15);
-        env.write_dt(i2c_adrs, &i2c_data);
+
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                i2c.write_dt(i2c_adrs, &i2c_data);
+            }
+        });
+
         delay_msec(900);
     }
     //-------------------------------------------------------------------------
-    pub fn init(env: &mut I2cEnv, number: usize) -> i32 {
+    pub fn init(number: usize) -> i32 {
         if number >= MAX_DEVICE_MBR3110 {
             return -1;
         }
@@ -305,12 +335,12 @@ impl Mbr3110 {
 
         let check_sum_l: u8 = config_data[126];
         let check_sum_h: u8 = config_data[127];
-        let mut err = Mbr3110::check_write_config(env, check_sum_l, check_sum_h, i2c_adrs);
+        let mut err = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs);
         if err != 0 {
             return err;
         }
 
-        let result = Mbr3110::self_test(env, number);
+        let result = Self::self_test(number);
         match result {
             Ok(self_check_result) => {
                 if (self_check_result & 0x80) != 0 {
@@ -322,44 +352,44 @@ impl Mbr3110 {
         err
     }
     //-------------------------------------------------------------------------
-    pub fn _setup_device(env: &mut I2cEnv, number: usize) -> i32 {
+    pub fn _setup_device(number: usize) -> i32 {
         let i2c_adrs: u8 = MBR_I2C_ADDRESS[number];
         if number >= MAX_DEVICE_MBR3110 {
             return -1;
         }
 
-        Mbr3110::reset(env, i2c_adrs);
+        Self::reset(i2c_adrs);
 
         let config_data = &CY8CMBR3110_CONFIG_DATA[number];
         let check_sum_l = config_data[126];
         let check_sum_h = config_data[127];
-        if Mbr3110::check_write_config(env, check_sum_l, check_sum_h, i2c_adrs) == 0 {
+        if Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs) == 0 {
             //  checksum got correct.
             //  it doesn't need to write config.
             return 0;
         }
 
         //  check if factory preset device
-        let mut err = Mbr3110::write_config(env, number, CAP_SENSE_ADDRESS_ORG);
+        let mut err = Self::write_config(number, CAP_SENSE_ADDRESS_ORG);
         if err != 0 {
             //  if err then change I2C Address
             //    and rewrite config to current device
-            err = Mbr3110::write_config(env, number, i2c_adrs);
+            err = Self::write_config(number, i2c_adrs);
             if err != 0 {
                 return err;
             }
         }
 
         //  After writing, Check again.
-        Mbr3110::reset(env, i2c_adrs);
-        err = Mbr3110::check_write_config(env, check_sum_l, check_sum_h, i2c_adrs);
+        Self::reset(i2c_adrs);
+        err = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs);
         if err != 0 {
             //  checksum error
             return err;
         }
 
         //let result = Mbr3110::self_test(env, number);
-        match Mbr3110::self_test(env, number) {
+        match Self::self_test(number) {
             Err(err) => return err,
             Ok(check_result) => {
                 if (check_result & 0x80) != 0 {
@@ -370,35 +400,51 @@ impl Mbr3110 {
         return err;
     }
     //-------------------------------------------------------------------------
-    fn self_test(env: &mut I2cEnv, number: usize) -> Result<u8, i32> {
+    fn self_test(number: usize) -> Result<u8, i32> {
         let wt_dt: [u8; 1] = [TOTAL_WORKING_SNS];
-        if let Some(rd_dt) = env.read_dt::<1>(MBR_I2C_ADDRESS[number], &wt_dt) {
-            Ok(rd_dt[0])
-        }
-        else {Err(-1)}
+        let _ = free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                if let Some(rd_dt) = i2c.read_dt::<1>(MBR_I2C_ADDRESS[number], &wt_dt) {
+                    Ok(rd_dt[0])
+                }
+                else {Err(-1)}
+            }
+            else {Err(-1)}
+        });
+        Err(-1)
     }
     //-------------------------------------------------------------------------
-    pub fn _change_sensitivity(env: &mut I2cEnv, data: u8, number: usize) {
+    pub fn _change_sensitivity(data: u8, number: usize) {
         //	data : 0-3
         let mut reg_data2 = data & 0x03;
         reg_data2 |= reg_data2 << 2;
         let reg_data4 = reg_data2 | (reg_data2 << 4);
         let i2c_adrs: u8 = MBR_I2C_ADDRESS[number];
 
-        let mut i2c_data: [u8; 2] = [SENSITIVITY0, reg_data2];
-        env.write_dt(i2c_adrs, &i2c_data);
-        i2c_data = [SENSITIVITY1, reg_data4];
-        env.write_dt(i2c_adrs, &i2c_data);
-        i2c_data = [SENSITIVITY2, reg_data2];
-        env.write_dt(i2c_adrs, &i2c_data);
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                let mut i2c_data: [u8; 2] = [SENSITIVITY0, reg_data2];
+                i2c.write_dt(i2c_adrs, &i2c_data);
+                i2c_data = [SENSITIVITY1, reg_data4];
+                i2c.write_dt(i2c_adrs, &i2c_data);
+                i2c_data = [SENSITIVITY2, reg_data2];
+                i2c.write_dt(i2c_adrs, &i2c_data);
+            }
+        });
     }
     //-------------------------------------------------------------------------
-    pub fn read_touch_sw(env: &mut I2cEnv, number: usize) -> Result<[u8; 2], i32> {
+    pub fn read_touch_sw(number: usize) -> Result<[u8; 2], i32> {
         let mut count = 0;
         loop {
-            if let Some(rd_dt) = env.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]) {
-                return Ok(rd_dt)
-            }
+            let _ = free(|cs| {
+                if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {            
+                    if let Some(rd_dt) = i2c.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]) {
+                        return Ok(rd_dt)
+                    }
+                    else {Err(-1)}
+                }
+                else {Err(-1)}
+            });
             count += 1;
             if count > 10 {return Err(-1)}
             //delay_msec(1);
@@ -406,77 +452,166 @@ impl Mbr3110 {
     }
     //-------------------------------------------------------------------------
     fn check_write_config(
-        env: &mut I2cEnv,
         check_sum_l: u8,
         check_sum_h: u8,
         crnt_adrs: u8,
     ) -> i32 {
-        if let Some(rd_dt) = env.read_dt::<2>(crnt_adrs, &[CONFIG_CRC]) {
-            if (rd_dt[0] == check_sum_l) && (rd_dt[1] == check_sum_h) {
-                return 0;
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                if let Some(rd_dt) = i2c.read_dt::<2>(crnt_adrs, &[CONFIG_CRC]) {
+                    if (rd_dt[0] == check_sum_l) && (rd_dt[1] == check_sum_h) {
+                        return 0;
+                    }
+                    else {return -2;} //  check sum didn't match
+                }
+                else {return -1;}
             }
-            else {return -2;} //  check sum didn't match
-        }
+            else {return -1;}
+        });
         -1
     }
     //-------------------------------------------------------------------------
-    fn write_config(env: &mut I2cEnv, number: usize, i2c_adrs: u8) -> i32 {
+    fn collate_1byte(i2c_adrs: u8, dt: &[u8;1], cdt: u8) -> i32 {
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                if let Some(data) = i2c.read_dt::<1>(i2c_adrs, dt) {
+                    if data[0] == cdt {return 0}
+                    else {return -2}
+                }
+                else {return -1}
+            }
+            else {return -1}
+        });
+        0
+    }
+    fn collate_2bytes(i2c_adrs: u8, dt: &[u8;1], cdt1: u8, cdt2: u8) -> i32 {
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                if let Some(data) = i2c.read_dt::<2>(i2c_adrs, dt) {
+                    if data[0] == cdt1 && data[1] == cdt2 {return 0}
+                    else {return -2}
+                }
+                else {return -1}
+            }
+            else {return -1}
+        });
+        0
+    }
+    fn check_finished(i2c_adrs: u8) -> i32 {
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                if let Some(data) = i2c.read_dt::<1>(i2c_adrs, &[CTRL_CMD_ERR]) {
+                    if data[0] == 0xfe      {return -4;}    //  bad check sum
+                    else if data[0] == 0xff {return -5;}    //  invalid command
+                    else if data[0] == 0xfd {return -6;}    //  failed to write flash
+                    else {return 0}
+                }
+                else {return -1}
+            }
+            else {return -1}
+        });
+        0
+    }
+    fn write_config(number: usize, i2c_adrs: u8) -> i32 {
         let config_data = &CY8CMBR3110_CONFIG_DATA[number];
 
         // ** Prepare **
-        Mbr3110::reset(env, i2c_adrs);
+        Mbr3110::reset(i2c_adrs);
 
         // ** Step 1 **
         //	Check Power On
 
         //	Check I2C Address
-        if let Some(data) = env.read_dt::<1>(i2c_adrs, &[I2C_ADDR]) {
-            if data[0] == i2c_adrs {/* OK */}
-            else {return -2}
+        let err = Self::collate_1byte(i2c_adrs, &[I2C_ADDR], i2c_adrs);
+        if err != 0 {
+            return err;
         }
-        else {return -1}
+//        free(|cs| {
+//            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+//                if let Some(data) = i2c.read_dt::<1>(i2c_adrs, &[I2C_ADDR]) {
+//                    if data[0] == i2c_adrs {/* OK */}
+//                    else {return -2}
+//                }
+//                else {return -1}
+//            }
+//            else {return -1}
+//        });
 
         // ** Step 2 **
-        if let Some(data) = env.read_dt::<2>(i2c_adrs, &[DEVICE_ID_ADRS]) {
-            if (data[0] == DEVICE_ID_LOW) && (data[1] == DEVICE_ID_HIGH) {}/* OK */
-            else {return -3}
-        }
-        else {return -1}
+        let err = Self::collate_2bytes(i2c_adrs, &[DEVICE_ID_ADRS], DEVICE_ID_LOW, DEVICE_ID_HIGH);
+        if err != 0 {
+            return err;
+        }       
+//        free(|cs| {
+//            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+//                if let Some(data) = i2c.read_dt::<2>(i2c_adrs, &[DEVICE_ID_ADRS]) {
+//                    if (data[0] == DEVICE_ID_LOW) && (data[1] == DEVICE_ID_HIGH) {}/* OK */
+//                    else {return -3}
+//                }
+//                else {return -1}
+//            }
+//            else {return -1}
+//        });
 
-        if let Some(data) = env.read_dt::<1>(i2c_adrs, &[FAMILY_ID_ADRS]) {
-            if data[0] == FAMILY_ID { /* OK */}
-            else {return -4}
+        let err = Self::collate_1byte(i2c_adrs, &[FAMILY_ID_ADRS], FAMILY_ID);
+        if err != 0 {
+            return err;
         }
-        else {return -1}
+//          free(|cs| {
+//            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {                
+//                if let Some(data) = i2c.read_dt::<1>(i2c_adrs, &[FAMILY_ID_ADRS]) {
+//                    if data[0] == FAMILY_ID { /* OK */}
+//                    else {return -4}
+//                }
+//                else {return -1}
+//            }
+//            else {-1}
+//        });
 
         // ** Step 3 **
-        //	send Config Data
-        let mut data: [u8; 2];
-        for i in 0..CONFIG_DATA_SZ {
-            data = [CONFIG_DATA_OFFSET + (i as u8), config_data[i]];
-            env.write_dt(i2c_adrs, &data);
-        }
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                //	send Config Data
+                let mut data: [u8; 2];
+                for i in 0..CONFIG_DATA_SZ {
+                    data = [CONFIG_DATA_OFFSET + (i as u8), config_data[i]];
+                    i2c.write_dt(i2c_adrs, &data);
+                }
 
-        //	Write to flash
-        let data = [CTRL_CMD, SAVE_CHECK_CRC];
-        env.write_dt(i2c_adrs, &data);
+                //	Write to flash
+                let data = [CTRL_CMD, SAVE_CHECK_CRC];
+                i2c.write_dt(i2c_adrs, &data);
+            }
+        });
 
         //	220msec Wait
         delay_msec(300);
 
         //	Check to finish writing
-        let wrt_dt = [CTRL_CMD_ERR];
-        if let Some(data) = env.read_dt::<1>(i2c_adrs, &wrt_dt) {
-            if data[0] == 0xfe      {return -4;}    //  bad check sum
-            else if data[0] == 0xff {return -5;}    //  invalid command
-            else if data[0] == 0xfd {return -6;}    //  failed to write flash
-            else { /* OK */}
+        let err = Self::check_finished(i2c_adrs);
+        if err != 0 {
+            return err;
         }
-        else {return -1}
+//        free(|cs| {
+//            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+//                let wrt_dt = [CTRL_CMD_ERR];
+//                if let Some(data) = i2c.read_dt::<1>(i2c_adrs, &wrt_dt) {
+//                    if data[0] == 0xfe      {return -4;}    //  bad check sum
+//                    else if data[0] == 0xff {return -5;}    //  invalid command
+//                    else if data[0] == 0xfd {return -6;}    //  failed to write flash
+//                    else { /* OK */}
+//                }
+//                else {return -1}
+//            else {return -1}
+//        });
 
-        //	Reset
-        let data: [u8; 2] = [CTRL_CMD, DEVICE_RESET];
-        env.write_dt(i2c_adrs, &data);
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {            
+                //	Reset
+                let data: [u8; 2] = [CTRL_CMD, DEVICE_RESET];
+                i2c.write_dt(i2c_adrs, &data);
+            }
+        });
 
         //	100msec Wait
         delay_msec(100);
@@ -485,16 +620,23 @@ impl Mbr3110 {
         //	Get Config Data
         let wrt_dt = [CONFIG_DATA_OFFSET];
         let i2c_adrs_for_num = MBR_I2C_ADDRESS[number];
-        if let Some(rd_dt) = env.read_dt::<CONFIG_DATA_SZ>(i2c_adrs_for_num, &wrt_dt) {
-        //	Compare both Data
-            for i in 0..CONFIG_DATA_SZ {
-                if config_data[i] != rd_dt[i] {
-                    return i as i32;
+
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                if let Some(rd_dt) = i2c.read_dt::<CONFIG_DATA_SZ>(i2c_adrs_for_num, &wrt_dt) {
+                //	Compare both Data
+                    for i in 0..CONFIG_DATA_SZ {
+                        if config_data[i] != rd_dt[i] {
+                            return i as i32;
+                        }
+                    }
+                    0   /* OK */
                 }
+                else {return -1}
             }
-            0   /* OK */
-        }
-        else {return -1}
+            else {return -1}
+        });
+        0
     }
 }
 //*******************************************************************
@@ -505,13 +647,17 @@ pub struct Ada88;
 #[cfg(feature = "ada88")]
 impl Ada88 {
     const I2C_ADRS: u8 = 0x70;
-    pub fn init(env: &mut I2cEnv) -> i32 {
-        env.write_dt(Self::I2C_ADRS, &[0x21, 0]);
-        env.write_dt(Self::I2C_ADRS, &[0x81, 0]);
-        env.write_dt(Self::I2C_ADRS, &[0xef, 0]);
+    pub fn init() -> i32 {
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                i2c.write_dt(Self::I2C_ADRS, &[0x21, 0]);
+                i2c.write_dt(Self::I2C_ADRS, &[0x81, 0]);
+                i2c.write_dt(Self::I2C_ADRS, &[0xef, 0]);
+            }
+        });
         0
     }
-    pub fn write_letter(env: &mut I2cEnv, ltr: usize) {
+    pub fn write_letter(ltr: usize) {
         let mut wrdt: [u8; 17] = [0; 17];
         const LETTER_DOT: [[u8; 8]; 24] = [
             [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], //	0:nothing
@@ -542,9 +688,13 @@ impl Ada88 {
         for (i, dt) in LETTER_DOT[ltr].iter().enumerate() {
             wrdt[2 * i + 1] = *dt;
         }
-        env.write_dt(Self::I2C_ADRS, &wrdt);
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                i2c.write_dt(Self::I2C_ADRS, &wrdt);
+            }
+        });
     }
-    pub fn write_number(env: &mut I2cEnv, num: i16) {
+    pub fn write_number(num: i16) {
         //	num 1999 .. -1999
         let mut cnvt_num: i16 = num;
         const NUM_LETTER: [[u8; 5]; 10] = [
@@ -607,7 +757,11 @@ impl Ada88 {
             wrdt[i * 2 + 1] = led_ptn[i];
             wrdt[i * 2 + 2] = 0;
         }
-        env.write_dt(Self::I2C_ADRS, &wrdt);
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                i2c.write_dt(Self::I2C_ADRS, &wrdt);
+            }
+        });
     }
 }
 //-------------------------------------------------------------------------
@@ -618,10 +772,14 @@ pub struct Pca9544;
 #[cfg(feature = "Pca9544")]
 impl Pca9544 {
     const PCA9544A_I2C_ADRS: u8 = 0x70;
-    pub fn change_i2cbus(env: &mut I2cEnv, i2c_num: u8, dev_num: usize) {
+    pub fn change_i2cbus(i2c_num: u8, dev_num: usize) {
         let i2c_buf = [0x04 | (i2c_num & 0x0003)];
         let i2c_adrs = Self::PCA9544A_I2C_ADRS + dev_num as u8;
-        env.write_dt(i2c_adrs, &i2c_buf);
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                i2c.write_dt(i2c_adrs, &i2c_buf);
+            }
+        });
     }
 }
 
@@ -633,23 +791,26 @@ pub struct Pca9685;
 #[cfg(feature = "Pca9685")] //	for LED Driver
 impl Pca9685 {
     const PCA9685_ADDRESS: u8 = 0x40;
-    pub fn write(env: &mut I2cEnv, chip_number: usize, cmd1: u8, cmd2: u8) {
+    pub fn write(chip_number: usize, cmd1: u8, cmd2: u8) {
         let i2c_buf: [u8; 2] = [cmd1, cmd2];
-        env.write_dt(Self::PCA9685_ADDRESS + chip_number as u8, &i2c_buf);
+        free(|cs| {
+            if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+               i2c.write_dt(Self::PCA9685_ADDRESS + chip_number as u8, &i2c_buf);
+            }
+        });
     }
     //-------------------------------------------------------------------------
     //		Initialize
     //-------------------------------------------------------------------------
-    pub fn init(env: &mut I2cEnv, chip_number: usize) {
+    pub fn init(chip_number: usize) {
         //	Init Parameter
-        Self::write(env, chip_number, 0x00, 0x00);
-        Self::write(env, chip_number, 0x01, 0x12); //	Invert, OE=high-impedance
+        Self::write(chip_number, 0x00, 0x00);
+        Self::write(chip_number, 0x01, 0x12); //	Invert, OE=high-impedance
     }
     //-------------------------------------------------------------------------
     //		rNum, gNum, bNum : 0 - 4094  bigger, brighter
     //-------------------------------------------------------------------------
     pub fn _set_fullcolor_led(
-        env: &mut I2cEnv,
         chip_number: usize,
         mut led_num: u8,
         color: &[u16; 3],
@@ -668,11 +829,11 @@ impl Pca9685 {
             //	Set PWM On Timing
             let color_ofs: u8 = (i as u8) * 4 + led_num * 16;
             let cmd2: u8 = (color_cnt & 0x00ff) as u8;
-            Self::write(env, chip_number, 0x06 + color_ofs, cmd2);
+            Self::write(chip_number, 0x06 + color_ofs, cmd2);
             let cmd2: u8 = ((color_cnt & 0xff00) >> 8) as u8;
-            Self::write(env, chip_number, 0x07 + color_ofs, cmd2);
-            Self::write(env, chip_number, 0x08 + color_ofs, 0);
-            Self::write(env, chip_number, 0x09 + color_ofs, 0);
+            Self::write(chip_number, 0x07 + color_ofs, cmd2);
+            Self::write(chip_number, 0x08 + color_ofs, 0);
+            Self::write(chip_number, 0x09 + color_ofs, 0);
         }
     }
 }
