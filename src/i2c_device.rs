@@ -53,13 +53,15 @@ impl I2cEnv {
             _ => (),
         }
     }
-    pub fn read_dt<const T: usize>(&mut self, adrs: u8, dt: &[u8]) -> [u8; T] {
+    pub fn read_dt<const T: usize>(&mut self, adrs: u8, dt: &[u8]) -> Option<[u8; T]> {
         let mut readbuf: [u8; T] = [0; T];
         match self.i2c_env.write_read(adrs, dt, &mut readbuf) {
-            Err(_err) => info!("I2C Wrong!"),
-            _ => (),
-        }
-        readbuf
+            Err(_err) => {
+                info!("I2C Wrong!");
+                return None;
+            },
+            _ => return Some(readbuf),
+        }        
     }
 }
 //*******************************************************************
@@ -320,7 +322,7 @@ impl Mbr3110 {
         err
     }
     //-------------------------------------------------------------------------
-    pub fn setup_device(env: &mut I2cEnv, number: usize) -> i32 {
+    pub fn _setup_device(env: &mut I2cEnv, number: usize) -> i32 {
         let i2c_adrs: u8 = MBR_I2C_ADDRESS[number];
         if number >= MAX_DEVICE_MBR3110 {
             return -1;
@@ -370,8 +372,10 @@ impl Mbr3110 {
     //-------------------------------------------------------------------------
     fn self_test(env: &mut I2cEnv, number: usize) -> Result<u8, i32> {
         let wt_dt: [u8; 1] = [TOTAL_WORKING_SNS];
-        let rd_dt = env.read_dt::<1>(MBR_I2C_ADDRESS[number], &wt_dt);
-        Ok(rd_dt[0])
+        if let Some(rd_dt) = env.read_dt::<1>(MBR_I2C_ADDRESS[number], &wt_dt) {
+            Ok(rd_dt[0])
+        }
+        else {Err(-1)}
     }
     //-------------------------------------------------------------------------
     pub fn _change_sensitivity(env: &mut I2cEnv, data: u8, number: usize) {
@@ -390,8 +394,15 @@ impl Mbr3110 {
     }
     //-------------------------------------------------------------------------
     pub fn read_touch_sw(env: &mut I2cEnv, number: usize) -> Result<[u8; 2], i32> {
-        let rd_dt = env.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]);
-        Ok(rd_dt)
+        let mut count = 0;
+        loop {
+            if let Some(rd_dt) = env.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]) {
+                return Ok(rd_dt)
+            }
+            count += 1;
+            if count > 10 {return Err(-1)}
+            //delay_msec(1);
+        }
     }
     //-------------------------------------------------------------------------
     fn check_write_config(
@@ -400,11 +411,13 @@ impl Mbr3110 {
         check_sum_h: u8,
         crnt_adrs: u8,
     ) -> i32 {
-        let rd_dt = env.read_dt::<2>(crnt_adrs, &[CONFIG_CRC]);
-        if (rd_dt[0] == check_sum_l) && (rd_dt[1] == check_sum_h) {
-            return 0;
+        if let Some(rd_dt) = env.read_dt::<2>(crnt_adrs, &[CONFIG_CRC]) {
+            if (rd_dt[0] == check_sum_l) && (rd_dt[1] == check_sum_h) {
+                return 0;
+            }
+            else {return -2;} //  check sum didn't match
         }
-        -1 //  check sum didn't match
+        -1
     }
     //-------------------------------------------------------------------------
     fn write_config(env: &mut I2cEnv, number: usize, i2c_adrs: u8) -> i32 {
@@ -417,21 +430,24 @@ impl Mbr3110 {
         //	Check Power On
 
         //	Check I2C Address
-        let data = env.read_dt::<1>(i2c_adrs, &[I2C_ADDR]);
-        if data[0] != i2c_adrs {
-            return -1;
+        if let Some(data) = env.read_dt::<1>(i2c_adrs, &[I2C_ADDR]) {
+            if data[0] == i2c_adrs {/* OK */}
+            else {return -2}
         }
+        else {return -1}
 
         // ** Step 2 **
-        let data = env.read_dt::<2>(i2c_adrs, &[DEVICE_ID_ADRS]);
-        if (data[0] != DEVICE_ID_LOW) || (data[1] != DEVICE_ID_HIGH) {
-            return -2;
+        if let Some(data) = env.read_dt::<2>(i2c_adrs, &[DEVICE_ID_ADRS]) {
+            if (data[0] == DEVICE_ID_LOW) && (data[1] == DEVICE_ID_HIGH) {}/* OK */
+            else {return -3}
         }
+        else {return -1}
 
-        let data = env.read_dt::<1>(i2c_adrs, &[FAMILY_ID_ADRS]);
-        if data[0] != FAMILY_ID {
-            return -3;
+        if let Some(data) = env.read_dt::<1>(i2c_adrs, &[FAMILY_ID_ADRS]) {
+            if data[0] == FAMILY_ID { /* OK */}
+            else {return -4}
         }
+        else {return -1}
 
         // ** Step 3 **
         //	send Config Data
@@ -450,18 +466,13 @@ impl Mbr3110 {
 
         //	Check to finish writing
         let wrt_dt = [CTRL_CMD_ERR];
-        let data = env.read_dt::<1>(i2c_adrs, &wrt_dt);
-        if data[0] == 0xfe {
-            return -4;
+        if let Some(data) = env.read_dt::<1>(i2c_adrs, &wrt_dt) {
+            if data[0] == 0xfe      {return -4;}    //  bad check sum
+            else if data[0] == 0xff {return -5;}    //  invalid command
+            else if data[0] == 0xfd {return -6;}    //  failed to write flash
+            else { /* OK */}
         }
-        //  bad check sum
-        else if data[0] == 0xff {
-            return -5;
-        }
-        //  invalid command
-        else if data[0] == 0xfd {
-            return -6;
-        } //  failed to write flash
+        else {return -1}
 
         //	Reset
         let data: [u8; 2] = [CTRL_CMD, DEVICE_RESET];
@@ -474,15 +485,16 @@ impl Mbr3110 {
         //	Get Config Data
         let wrt_dt = [CONFIG_DATA_OFFSET];
         let i2c_adrs_for_num = MBR_I2C_ADDRESS[number];
-        let rd_dt = env.read_dt::<CONFIG_DATA_SZ>(i2c_adrs_for_num, &wrt_dt);
-
+        if let Some(rd_dt) = env.read_dt::<CONFIG_DATA_SZ>(i2c_adrs_for_num, &wrt_dt) {
         //	Compare both Data
-        for i in 0..CONFIG_DATA_SZ {
-            if config_data[i] != rd_dt[i] {
-                return i as i32;
+            for i in 0..CONFIG_DATA_SZ {
+                if config_data[i] != rd_dt[i] {
+                    return i as i32;
+                }
             }
+            0   /* OK */
         }
-        0
+        else {return -1}
     }
 }
 //*******************************************************************

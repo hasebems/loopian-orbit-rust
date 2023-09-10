@@ -231,6 +231,7 @@ fn main() -> ! {
     // Touch部白色LEDの Mute 解除
     whiteled_sw_pin.set_low().unwrap();
 
+    let mut err_number: i16 = 0;
     loop {
         exled_1_pin.set_high().unwrap();    //test
 
@@ -243,25 +244,26 @@ fn main() -> ! {
 
         if ev10ms {
             let mut touch_someone = false;
-            for i in 0..MAX_DEVICE_MBR3110 {
-                if available_each_device[i] {
-                    free(|cs| {
-                        if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+            free(|cs| {
+                if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
+                    for i in 0..MAX_DEVICE_MBR3110 {
+                        if available_each_device[i] {
                             Pca9544::change_i2cbus(i2c, 0, i);
                             match Mbr3110::read_touch_sw(i2c, i) {
                                 Ok(sw) => {
-                                    touch_someone = (sw[0] != 0) || (sw[1] != 0);
-                                    //touch_someone = swevt[i].update_sw_event(sw, tm);
+                                    touch_someone |= (sw[0] != 0) || (sw[1] != 0);
+                                    //touch_someone |= swevt[i].update_sw_event(sw, tm);
                                 }
                                 Err(_err) => {
                                     info!("Error!");
                                     exled_err_pin.set_low().unwrap();
+                                    err_number = (i as i16)*100 + (_err as i16);
                                 },
                             }
                         }
-                    });
+                    }
                 }
-            }
+            });
             if touch_someone {
                 exled_2_pin.set_low().unwrap();
             } else {
@@ -270,12 +272,11 @@ fn main() -> ! {
             dtct.update_touch_position();
         }
 
-        exled_1_pin.set_low().unwrap();// test
-
-        let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
+        // ADC
+        //let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
         free(|cs| {
             if let Some(i2c) = &mut *I2C_CONCLETE.borrow(cs).borrow_mut() {
-                Ada88::write_number(i2c, pin_adc_counts as i16);
+                Ada88::write_number(i2c, err_number);
             }
         });
         pled.gen_lighting_in_loop(tm);
@@ -309,13 +310,19 @@ fn check_and_setup_board() {
     loop {}
 }
 fn delay_msec(time: u32) {
-    let mut count = 0;
+    let mut first: Option<u32> = None;
+    let mut diff = 0;
+    let mut realtime = 0;
     loop {
-        free(|cs| {
-            count = *COUNTER.borrow(cs).borrow();
-        });
-        if count > time {
+        if diff >= time {
             break;
+        }
+        free(|cs| {
+            realtime = *COUNTER.borrow(cs).borrow();
+        });
+        match first {
+            Some(f) => diff = realtime - f,
+            None => first = Some(realtime),
         }
     }
 }
