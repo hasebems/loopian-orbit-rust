@@ -161,24 +161,14 @@ fn main() -> ! {
             clocks.usb_clock,
             true,
             &mut pac.RESETS,
-        )));
-        if let Some(usb_bus_ref) = USB_BUS.as_ref() {
-            MIDI = Some(MidiClass::new(usb_bus_ref));
-            USB_DEVICE = Some(
-                UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x0000))
-                    .product("Loopian-ORBIT")
-                    .device_class(USB_CLASS_NONE)
-                    .build(),
-            );
-            // Enable the USB interrupt
-            pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
-        }
-    };
+        )));  
+    }
+    setup_midi();
 
     // Application Setup mode
     let mut available_each_device = [true; MAX_DEVICE_MBR3110];
     if setup_mode {
-        Ada88::write_letter(21);
+        Ada88::write_letter(21);// SU
         exled_err_pin.set_low().unwrap();
         check_and_setup_board();
         // 戻ってこない
@@ -188,20 +178,22 @@ fn main() -> ! {
         for i in 0..MAX_DEVICE_MBR3110 {
             Pca9544::change_i2cbus(0, i);
             let err = Mbr3110::init(i);
+            exled_1_pin.set_low().unwrap();
             if err != 0 {
                 available_each_device[i] = false;
                 exist_err = err;
             }
         }
-        let mut disp_num: usize;
+        let mut disp_num: i32;
         if exist_err != 0 {
             exled_err_pin.set_low().unwrap();
-            disp_num = 9 + exist_err as usize; // Error: AF,BF,CF ...
-            if disp_num >= 23 { disp_num = 23;}
+            disp_num = 20 + exist_err; // Error: AF,BF,CF ...
+            if disp_num >= 23 { disp_num = 23;}// Er
+            else if disp_num < 0 {disp_num = 0;}
         } else {
             disp_num = 22; // OK
         }
-        Ada88::write_letter(disp_num);
+        Ada88::write_letter(disp_num as usize);
         delay_msec(3000);
     }
 
@@ -232,8 +224,8 @@ fn main() -> ! {
                     Pca9544::change_i2cbus(0, i);
                     match Mbr3110::read_touch_sw(i) {
                         Ok(sw) => {
-                            touch_someone |= (sw[0] != 0) || (sw[1] != 0);
-                            //touch_someone |= swevt[i].update_sw_event(sw, tm);
+                            //touch_someone |= (sw[0] != 0) || (sw[1] != 0);
+                            touch_someone |= swevt[i].update_sw_event(sw, tm);
                         }
                         Err(_err) => {
                             info!("Error!");
@@ -252,8 +244,8 @@ fn main() -> ! {
         }
 
         // ADC
-        //let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
-        Ada88::write_number(err_number);
+        let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
+        Ada88::write_number(pin_adc_counts as i16);
         pled.gen_lighting_in_loop(tm);
 
         if ev1s {
@@ -281,7 +273,61 @@ fn main() -> ! {
 //*******************************************************************
 //          System Functions
 //*******************************************************************
+fn setup_midi() {
+    unsafe {
+        if let Some(usb_bus_ref) = USB_BUS.as_ref() {
+            MIDI = Some(MidiClass::new(usb_bus_ref));
+            USB_DEVICE = Some(
+                UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x0000))
+                    .product("Loopian-ORBIT")
+                    .device_class(USB_CLASS_NONE)
+                    .build(),
+            );
+            // Enable the USB interrupt
+            pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
+        }
+    }
+}
 fn check_and_setup_board() {
+    for i in 0..MAX_DEVICE_MBR3110 {
+        Pca9544::change_i2cbus(0, i);
+        let err = Mbr3110::setup_device(i);
+        if err != 0 {
+
+        }
+        else {
+        }
+    }
+
+  // CapSense Setup Mode
+  /*bool sup_ok = false;
+
+  for (int i=0; i<MAX_DEVICE_MBR3110; ++i){
+    pca9544_changeI2cBus(0,i);
+    err = MBR3110_setup(i);
+    if (err){
+      digitalWrite(LED_ERR, LOW); // turn on
+    }
+    else{
+      ada88_write(22); // "Ok"
+      sup_ok = true;
+      break;
+    }
+  }
+
+  if (!sup_ok){ada88_write(23);} // "Er"
+  delay(2000);          // if something wrong, 2sec LED_ERR on
+
+  for (int i=0; i<3; i++){  // when finished, flash 3times.
+    digitalWrite(LED_ERR, LOW);
+    delay(100);
+    digitalWrite(LED_ERR, HIGH);
+    delay(100);
+  }
+  if (!sup_ok){digitalWrite(LED_ERR, LOW);}*/
+
+
+
     loop {}
 }
 fn delay_msec(time: u32) {

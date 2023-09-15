@@ -4,8 +4,6 @@
 //  https://opensource.org/licenses/mit-license.php
 //
 use crate::i2c_device::{Ada88, I2cEnv, Mbr3110, Pca9544, Pca9685};
-//use crate::I2C_CONCLETE;
-use cortex_m::interrupt::{free, Mutex};
 
 pub const MAX_DEVICE_MBR3110: usize = 6;
 pub const MAX_ELECTRODE_PER_DEV: usize = 8;
