@@ -38,21 +38,23 @@ use usbd_midi::data::usb_midi::{
     cable_number::CableNumber, usb_midi_event_packet::UsbMidiEventPacket,
 };
 use usbd_midi::{
-    data::byte::from_traits::FromClamped, data::usb::constants::USB_CLASS_NONE,
+    data::byte::from_traits::FromClamped,
+    data::usb::constants::USB_CLASS_NONE,
     midi_device::MidiClass,
 };
 
-use i2c_device::{Ada88, I2cEnv, i2c_init, Mbr3110, Pca9544, Pca9685};
+use i2c_device::{Ada88, Mbr3110, Pca9544, Pca9685};
 use lpn_chore::{
-    DetectPosition, LoopClock, PositionLed, SwitchEvent, MAX_DEVICE_MBR3110, MAX_ELECTRODE_PER_DEV,
+    DetectPosition, LoopClock, PositionLed, SwitchEvent,
+    MAX_DEVICE_MBR3110, MAX_TOUCH_EV,
 };
 
 //*******************************************************************
 //          Global Variable/DEF
 //*******************************************************************
-static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
+static mut USB_DEVICE: Mutex<RefCell<Option<UsbDevice<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
+static mut MIDI: Mutex<RefCell<Option<MidiClass<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
-static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
 
 // 割り込みハンドラからハードウェア制御できるように、static変数にする
 // Mutex<RefCell<Option<共有変数>>> = Mutex::new(RefCell::new(None));
@@ -71,11 +73,12 @@ fn SysTick() {
 }
 #[interrupt]
 unsafe fn USBCTRL_IRQ() {
-    if let Some(usb_dev) = USB_DEVICE.as_mut() {
-        if let Some(midi) = MIDI.as_mut() {
+    free(|cs| {
+    if let Some(usb_dev) = USB_DEVICE.borrow(cs).borrow_mut().as_mut() {
+        if let Some(midi) = MIDI.borrow(cs).borrow_mut().as_mut() {
             usb_dev.poll(&mut [midi]);
         }
-    }
+    }});
 }
 //*******************************************************************
 //          main
@@ -161,7 +164,7 @@ fn main() -> ! {
             clocks.usb_clock,
             true,
             &mut pac.RESETS,
-        )));  
+        )));
     }
     setup_midi();
 
@@ -187,7 +190,7 @@ fn main() -> ! {
         let mut disp_num: i32;
         if exist_err != 0 {
             exled_err_pin.set_low().unwrap();
-            disp_num = 20 + exist_err; // Error: AF,BF,CF ...
+            disp_num = 20 + exist_err; // Error: 19:き, 18:ま, 
             if disp_num >= 23 { disp_num = 23;}// Er
             else if disp_num < 0 {disp_num = 0;}
         } else {
@@ -205,11 +208,10 @@ fn main() -> ! {
 
     // Touch部白色LEDの Mute 解除
     whiteled_sw_pin.set_low().unwrap();
+    exled_1_pin.set_high().unwrap();    //test
 
-    let mut err_number: i16 = 0;
+    let mut err_number: i16;
     loop {
-        exled_1_pin.set_high().unwrap();    //test
-
         free(|cs| {
             lpclk.set_clock(*COUNTER.borrow(cs).borrow());
         });
@@ -224,13 +226,13 @@ fn main() -> ! {
                     Pca9544::change_i2cbus(0, i);
                     match Mbr3110::read_touch_sw(i) {
                         Ok(sw) => {
-                            //touch_someone |= (sw[0] != 0) || (sw[1] != 0);
                             touch_someone |= swevt[i].update_sw_event(sw, tm);
                         }
                         Err(_err) => {
                             info!("Error!");
                             exled_err_pin.set_low().unwrap();
                             err_number = (i as i16)*100 + (_err as i16);
+                            Ada88::write_number(err_number as i16);
                         },
                     }
                 }
@@ -240,31 +242,29 @@ fn main() -> ! {
             } else {
                 exled_2_pin.set_high().unwrap();
             }
-            dtct.update_touch_position();
+            let _ = dtct.update_touch_position(&swevt);
+        }
+
+        //  update touch location
+        let tchev: [i32; MAX_TOUCH_EV] = dtct.interporate_location(tm);
+        pled.gen_lighting_in_loop(tm, &tchev);
+
+        //  display location
+        let position = dtct.get_1st_position();
+        if position != -1 {
+            Ada88::write_number((position/10) as i16);
+        }
+        else {
+            Ada88::write_letter(0);
         }
 
         // ADC
-        let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
-        Ada88::write_number(pin_adc_counts as i16);
-        pled.gen_lighting_in_loop(tm);
-
+        //let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
+        //Ada88::write_number(pin_adc_counts as i16);
         if ev1s {
             if (lpclk.get_ms() / 1000) % 2 == 0 {
-                info!("on!");
-                output_midi_msg(Message::NoteOn(
-                    Channel::Channel1,
-                    Note::C3,
-                    FromClamped::from_clamped(100),
-                ));
-                //count += 1;
                 led_pin.set_high().unwrap();
             } else {
-                info!("off!");
-                output_midi_msg(Message::NoteOff(
-                    Channel::Channel1,
-                    Note::C3,
-                    FromClamped::from_clamped(64),
-                ));
                 led_pin.set_low().unwrap();
             }
         }
@@ -273,21 +273,6 @@ fn main() -> ! {
 //*******************************************************************
 //          System Functions
 //*******************************************************************
-fn setup_midi() {
-    unsafe {
-        if let Some(usb_bus_ref) = USB_BUS.as_ref() {
-            MIDI = Some(MidiClass::new(usb_bus_ref));
-            USB_DEVICE = Some(
-                UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x0000))
-                    .product("Loopian-ORBIT")
-                    .device_class(USB_CLASS_NONE)
-                    .build(),
-            );
-            // Enable the USB interrupt
-            pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
-        }
-    }
-}
 fn check_and_setup_board() {
     for i in 0..MAX_DEVICE_MBR3110 {
         Pca9544::change_i2cbus(0, i);
@@ -350,15 +335,38 @@ fn delay_msec(time: u32) {
 //*******************************************************************
 //          MIDI Out
 //*******************************************************************
-fn output_midi_msg(message: Message) {
-    // Send MIDI message
-    let midi = unsafe { MIDI.as_mut().unwrap() };
-    match midi.send_message(UsbMidiEventPacket {
-        cable_number: CableNumber::Cable0,
-        message,
-    }) {
-        Ok(_) => (),
-        Err(_) => (),
+fn setup_midi() {
+    unsafe {
+        if let Some(usb_bus_ref) = USB_BUS.as_ref() {
+            MIDI = Mutex::new(RefCell::new(Some(MidiClass::new(usb_bus_ref))));
+            USB_DEVICE = Mutex::new(RefCell::new(Some(
+                UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x0000))
+                    .product("Loopian-ORBIT")
+                    .device_class(USB_CLASS_NONE)
+                    .build(),
+            )));
+            // Enable the USB interrupt
+            pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
+        }
     }
+}
+fn output_midi_msg(message: Message) -> bool {
+    // Send MIDI message
+    let mut state: bool = false;
+    unsafe {
+        free(|cs| {
+            if let Some(midi) = MIDI.borrow(cs).borrow_mut().as_mut() {
+                match midi.send_message(UsbMidiEventPacket {
+                    cable_number: CableNumber::Cable0,
+                    message,
+                }) {
+                    Ok(_) => state = true,
+                    Err(_) => state = false,
+                }
+            }
+        });
+    }
+    delay_msec(1);
+    state
 }
 // End of file

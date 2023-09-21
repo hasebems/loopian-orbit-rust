@@ -9,7 +9,6 @@ use embedded_hal::prelude::_embedded_hal_blocking_i2c_Write;
 use embedded_hal::prelude::_embedded_hal_blocking_i2c_WriteRead;
 use panic_probe as _;
 
-use crate::delay_msec;
 use bsp::hal::{
     clocks::SystemClock,
     gpio::{bank0::*, FunctionI2C, Pin, PullDown},
@@ -18,14 +17,10 @@ use bsp::hal::{
 };
 use fugit::RateExtU32;
 use rp_pico as bsp;
-
-use crate::MAX_DEVICE_MBR3110;
-
-use core::borrow::BorrowMut;
-use core::cell::RefCell;
-use cortex_m::interrupt::{free, Mutex};
-use core::ptr::replace;
 use core::option::Option;
+
+use crate::delay_msec;
+use crate::MAX_DEVICE_MBR3110;
 
 static mut I2C_CONCLETE: Option<I2cEnv> = None;
 
@@ -112,16 +107,11 @@ pub trait I2cDev {
 //          CY8CMBR3110 Touch Sensor
 //*******************************************************************
 //const MAX_DEVICE_MBR3110: usize = 6;
-const MAX_TOUCH_EV: usize = 8;
-const MAX_EACH_SENS: usize = 8;
 
 const CONFIG_DATA_OFFSET: u8 = 0;
 const CONFIG_DATA_SZ: usize = 128;
 
-const SENSOR_EN: u8 = 0x00; //	Register Address
-const SENSITIVITY0: u8 = 0x08; //	Register Address
-const SENSITIVITY1: u8 = 0x09; //	Register Address
-const SENSITIVITY2: u8 = 0x0a; //	Register Address
+const _SENSOR_EN: u8 = 0x00; //	Register Address
 const I2C_ADDR: u8 = 0x51; //	Register Address
 const CONFIG_CRC: u8 = 0x7e; //	Register Address
 
@@ -138,8 +128,8 @@ const DEVICE_ID_LOW: u8 = 0x02;
 const DEVICE_ID_HIGH: u8 = 0x0a;
 
 const TOTAL_WORKING_SNS: u8 = 0x97; //	Register Address
-const SNS_VDD_SHORT: u8 = 0x9a; //	Register Address
-const SNS_GND_SHORT: u8 = 0x9c; //	Register Address
+const _SNS_VDD_SHORT: u8 = 0x9a; //	Register Address
+const _SNS_GND_SHORT: u8 = 0x9c; //	Register Address
 const BUTTON_STAT: u8 = 0xaa; //	Register Address
 
 const CAP_SENSE_ADDRESS_ORG: u8 = 0x37; //  Factory-Set
@@ -434,6 +424,9 @@ impl Mbr3110 {
         let reg_data4 = reg_data2 | (reg_data2 << 4);
         let i2c_adrs: u8 = MBR_I2C_ADDRESS[number];
 
+        const SENSITIVITY0: u8 = 0x08; //	Register Address
+        const SENSITIVITY1: u8 = 0x09; //	Register Address
+        const SENSITIVITY2: u8 = 0x0a; //	Register Address        
         unsafe {
             if let Some(i2c) = &mut I2C_CONCLETE {
                 let mut i2c_data: [u8; 2] = [SENSITIVITY0, reg_data2];
