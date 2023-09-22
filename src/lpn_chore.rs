@@ -3,11 +3,12 @@
 //  Released under the MIT license
 //  https://opensource.org/licenses/mit-license.php
 //
-use crate::i2c_device::{Ada88, Pca9544, Pca9685};
+use crate::i2c_device::{/*Ada88,*/ Pca9544, Pca9685};
 
 pub const MAX_DEVICE_MBR3110: usize = 6;
 pub const MAX_ELECTRODE_PER_DEV: usize = 8;
 pub const MAX_EACH_LIGHT: usize = 16;
+pub const MAX_NOTE: usize = MAX_DEVICE_MBR3110*16;
 
 pub const MAX_TOUCH_EV: usize = 8;
 pub const MAX_EACH_SENS: usize = 8;
@@ -172,17 +173,23 @@ impl Default for TouchEvent {
 //*******************************************************************
 pub struct DetectPosition {
     ev: [TouchEvent; MAX_TOUCH_EV],
+    note_status: [bool; MAX_NOTE],
+    notes_all: bool,
 }
 impl DetectPosition {
-    const SAME_FINGER: i32 = 450;
+    const SAME_FINGER: i32 = 450;   // 10msec あたりの一つの指とみなす最大動作量(1接点で200)
     const LED_CHASE_SPEED: i32 = 10;
+    const OFFSET_NOTE: usize = 0;
+
     pub fn init() -> Self {
         Self {
             ev: [TouchEvent::default(); MAX_TOUCH_EV],
+            note_status: [false; MAX_NOTE],
+            notes_all: false,
         }
     }
     pub fn get_1st_position(&self) -> i32 {self.ev[0].locate_target}
-    pub fn update_touch_position(&mut self, swdev: &[SwitchEvent; MAX_DEVICE_MBR3110]) -> u8 {
+    pub fn update_touch_position(&mut self, swdev: &[SwitchEvent; MAX_DEVICE_MBR3110], vel: u16) -> u8 {
         let mut new_ev = self.detect_touch(swdev);
         for x in new_ev.iter_mut() {
             if x.locate_target == TouchEvent::NOTHING {break}
@@ -193,11 +200,14 @@ impl DetectPosition {
                 if y.locate_target - Self::SAME_FINGER < x.locate_target && 
                   x.locate_target < y.locate_target + Self::SAME_FINGER {
                     found = true;
-                    x.move_from(y);
                     x.set_midi_note();
                     if x.midi_note() != y.midi_note() {
-                        let _ = Self::generate_midi(2, x.midi_note(), y.midi_note());
+                        let _ = Self::generate_midi(2, x.midi_note(), y.midi_note(), vel);
+                        self.note_status[x.midi_note()] = true;
+                        self.note_status[y.midi_note()] = false;
+                        self.notes_all = true;
                     }
+                    x.move_from(y);
                     break;
                 }
             }
@@ -205,19 +215,25 @@ impl DetectPosition {
                 x.locate_current = x.locate_target;
                 x.time = 0;
                 x.set_midi_note();
-                let _ = Self::generate_midi(1, x.midi_note(), 0);
+                let _ = Self::generate_midi(1, x.midi_note(), 0, vel);
+                self.note_status[x.midi_note()] = true;
+                self.notes_all = true;
             }
         }
+        let mut finger: u8 = 0;
         for z in self.ev.iter_mut() {
-            if z.locate_target == TouchEvent::NOTHING {break;}
-            if z.locate_target == TouchEvent::COLLATED {continue;}
+            if z.locate_target == TouchEvent::NOTHING {}
+            else if z.locate_target == TouchEvent::COLLATED {
+                finger += 1;
+            }
             else {
-                let _ = Self::generate_midi(0, 0, z.midi_note());
+                let _ = Self::generate_midi(0, 0, z.midi_note(), vel);
+                self.note_status[z.midi_note()] = false;
             }
         }
         // 最後にCopyする
         self.ev = new_ev;
-        0
+        finger
     }
     fn detect_touch(&mut self, swdev: &[SwitchEvent; MAX_DEVICE_MBR3110]) -> [TouchEvent; MAX_TOUCH_EV] {
         let mut start: bool = false;
@@ -251,21 +267,20 @@ impl DetectPosition {
         }
         new_ev
     }
-    fn generate_midi(note_type: i32, on_note: usize, off_note: usize) -> bool {
-        const OFFSET_NOTE: usize = 12;
+    fn generate_midi(note_type: i32, on_note: usize, off_note: usize, vel: u16) -> bool {
         let mut sccs1 = false;
         let mut sccs2 = false;
         if note_type > 0 {
             sccs2 = output_midi_msg(Message::NoteOn(
                 Channel::Channel1,
-                TouchEvent::U8_TO_NOTE[on_note+OFFSET_NOTE],
-                FromClamped::from_clamped(100),
+                TouchEvent::U8_TO_NOTE[on_note+Self::OFFSET_NOTE],
+                FromClamped::from_clamped(vel as u8),
             ));
         }
         if note_type != 1 {
             sccs1 = output_midi_msg(Message::NoteOff(
                 Channel::Channel1,
-                TouchEvent::U8_TO_NOTE[off_note+OFFSET_NOTE],
+                TouchEvent::U8_TO_NOTE[off_note+Self::OFFSET_NOTE],
                 FromClamped::from_clamped(64),
             ));
         }
@@ -327,6 +342,7 @@ impl PositionLed {
         self.fade_counter += difftm;
         if self.fade_counter > Self::FADE_RATE {self.fade_counter = 0;}
 
+        // Touch 位置を光らせる
         self.light_lvl = [0; MAX_EACH_LIGHT*MAX_DEVICE_MBR3110];
         let mut _max_ev: i32 = 0;
         for i in 0..MAX_TOUCH_EV {
@@ -343,6 +359,7 @@ impl PositionLed {
             _max_ev += 1;
         }
 
+        // 各かまぼこのLED点灯処理
         for k in 0..MAX_DEVICE_MBR3110 {
             self.one_kamaboco(k);
         }
@@ -351,11 +368,11 @@ impl PositionLed {
         //return max_ev;
     }
     fn one_kamaboco(&mut self, kamanum: usize) {
-        const MIN_DIFF: u16 = 4;
-        const MAX_STR: u32 = (MAX_EACH_LIGHT as u32)*(MIN_DIFF as u32); // 64
-        const HALF_STR: u32 = MAX_STR/2; // 32
+        const MIN_DIFF: u32 = 4;    // 隣り合う LED の明るさの差
+        const MAX_STRENGTH: u32 = (MAX_EACH_LIGHT as u32)*(MIN_DIFF as u32); // 64
+        const HALF_STRENGTH: u32 = MAX_STRENGTH/2; // 32
 
-        let divided_time = (self.total_time/5) as u16;
+        let divided_time = self.total_time/5;
         let offset_num = kamanum*MAX_EACH_LIGHT;
 
         for i in 0..MAX_EACH_LIGHT {
@@ -371,17 +388,17 @@ impl PositionLed {
             }
             else {
                 // 背景で薄く光っている
-                let mut ptn: u16 = (divided_time+(MIN_DIFF*(i as u16)))%(MAX_STR as u16);
-                if ptn >= HALF_STR as u16 {ptn = (MAX_STR as u16)-ptn;}
-                Self::light_led_each(i, kamanum, ptn);
+                let mut strength = (divided_time + (MIN_DIFF*(i as u32)))%MAX_STRENGTH;
+                if strength >= HALF_STRENGTH {strength = MAX_STRENGTH - strength;}
+                Self::light_led_each(i, kamanum, strength as u16);
             }
         }
     }
     fn light_led_each(num: usize, dev_num: usize, mut strength: u16) {
         // strength=0-4095
         let adrs = (num as u8)* 4 + 0x06;
-        if strength > 4000 {
-            strength = 4000;
+        if strength > 4095 {
+            strength = 4095;
         }
         Pca9544::change_i2cbus(3, dev_num);
         Pca9685::write(0, adrs, 0); // ONはtime=0

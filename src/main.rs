@@ -33,12 +33,14 @@ use cortex_m::prelude::_embedded_hal_adc_OneShot;
 
 // for USB MIDI
 use usb_device::{class_prelude::*, prelude::*};
-use usbd_midi::data::midi::{channel::Channel, message::Message, notes::Note};
+use usbd_midi::data::midi::{
+    message::Message, //channel::Channel, notes::Note
+};
 use usbd_midi::data::usb_midi::{
     cable_number::CableNumber, usb_midi_event_packet::UsbMidiEventPacket,
 };
 use usbd_midi::{
-    data::byte::from_traits::FromClamped,
+//    data::byte::from_traits::FromClamped,
     data::usb::constants::USB_CLASS_NONE,
     midi_device::MidiClass,
 };
@@ -52,13 +54,12 @@ use lpn_chore::{
 //*******************************************************************
 //          Global Variable/DEF
 //*******************************************************************
-static mut USB_DEVICE: Mutex<RefCell<Option<UsbDevice<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
-static mut MIDI: Mutex<RefCell<Option<MidiClass<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
-static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
-
 // 割り込みハンドラからハードウェア制御できるように、static変数にする
 // Mutex<RefCell<Option<共有変数>>> = Mutex::new(RefCell::new(None));
 static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0));
+static mut USB_DEVICE: Mutex<RefCell<Option<UsbDevice<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
+static mut MIDI: Mutex<RefCell<Option<MidiClass<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
+static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 
 //*******************************************************************
 //          interrupt/exception
@@ -121,14 +122,15 @@ fn main() -> ! {
     let sw1_pin = pins.gpio14.into_pull_down_input();
     let setup_mode = sw1_pin.is_low().unwrap();
     whiteled_sw_pin.set_high().unwrap(); // Touch部白色LEDの Mute
-    exled_err_pin.set_high().unwrap();  // 消灯
-    exled_1_pin.set_high().unwrap();    // 消灯
-    exled_2_pin.set_high().unwrap();    // 消灯
+    exled_err_pin.set_low().unwrap();  // 消灯
+    exled_1_pin.set_low().unwrap();    // 消灯
+    exled_2_pin.set_low().unwrap();    // 消灯
 
     // Enable ADC
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
     // Configure GPIO26 as an ADC input
     let mut adc_pin_0 = AdcPin::new(pins.gpio26);
+    let mut adc_pin_1 = AdcPin::new(pins.gpio27);
 
     // SysTickの設定
     // 自前でSysTickを制御するときは cortex_m::delay::Delay が使えないので注意
@@ -149,7 +151,7 @@ fn main() -> ! {
         clocks.system_clock,
     );
     Ada88::init();
-    Ada88::write_letter(0);
+    Ada88::write_letter(1);
     for i in 0..MAX_DEVICE_MBR3110 {
         Pca9544::change_i2cbus(3, i);
         Pca9685::init(0);
@@ -172,7 +174,7 @@ fn main() -> ! {
     let mut available_each_device = [true; MAX_DEVICE_MBR3110];
     if setup_mode {
         Ada88::write_letter(21);// SU
-        exled_err_pin.set_low().unwrap();
+        exled_err_pin.set_high().unwrap();
         check_and_setup_board();
         // 戻ってこない
     } else {
@@ -181,7 +183,7 @@ fn main() -> ! {
         for i in 0..MAX_DEVICE_MBR3110 {
             Pca9544::change_i2cbus(0, i);
             let err = Mbr3110::init(i);
-            exled_1_pin.set_low().unwrap();
+            exled_1_pin.set_high().unwrap();
             if err != 0 {
                 available_each_device[i] = false;
                 exist_err = err;
@@ -189,7 +191,7 @@ fn main() -> ! {
         }
         let mut disp_num: i32;
         if exist_err != 0 {
-            exled_err_pin.set_low().unwrap();
+            exled_err_pin.set_high().unwrap();
             disp_num = 20 + exist_err; // Error: 19:き, 18:ま, 
             if disp_num >= 23 { disp_num = 23;}// Er
             else if disp_num < 0 {disp_num = 0;}
@@ -208,9 +210,10 @@ fn main() -> ! {
 
     // Touch部白色LEDの Mute 解除
     whiteled_sw_pin.set_low().unwrap();
-    exled_1_pin.set_high().unwrap();    //test
+    exled_1_pin.set_low().unwrap();    //test
 
     let mut err_number: i16;
+    let mut ad_velocity: u16 = 100;
     loop {
         free(|cs| {
             lpclk.set_clock(*COUNTER.borrow(cs).borrow());
@@ -230,19 +233,24 @@ fn main() -> ! {
                         }
                         Err(_err) => {
                             info!("Error!");
-                            exled_err_pin.set_low().unwrap();
+                            exled_err_pin.set_high().unwrap();
                             err_number = (i as i16)*100 + (_err as i16);
                             Ada88::write_number(err_number as i16);
                         },
                     }
                 }
             }
-            if touch_someone {
-                exled_2_pin.set_low().unwrap();
-            } else {
+            if touch_someone {  // switch が押されている
                 exled_2_pin.set_high().unwrap();
+            } else {
+                exled_2_pin.set_low().unwrap();
             }
-            let _ = dtct.update_touch_position(&swevt);
+            let finger = dtct.update_touch_position(&swevt, ad_velocity);
+            if finger >= 2 {    //  指を２本検出している
+                exled_1_pin.set_high().unwrap();
+            } else {
+                exled_1_pin.set_low().unwrap();
+            }
         }
 
         //  update touch location
@@ -259,8 +267,16 @@ fn main() -> ! {
         }
 
         // ADC
-        //let pin_adc_counts: u16 = adc.read(&mut adc_pin_0).unwrap();
-        //Ada88::write_number(pin_adc_counts as i16);
+        let pin_adx_value: u16 = adc.read(&mut adc_pin_0).unwrap();
+        let pin_ady_value: u16 = adc.read(&mut adc_pin_1).unwrap();
+        let mut ad_vel_temp = if pin_adx_value > pin_ady_value {pin_adx_value} else {pin_ady_value};
+        ad_vel_temp = (ad_vel_temp/40) + 20;
+        if ad_vel_temp != ad_velocity {
+            ad_velocity = ad_vel_temp;
+            Ada88::write_number(ad_vel_temp as i16);
+        }
+
+        // Heart beat
         if ev1s {
             if (lpclk.get_ms() / 1000) % 2 == 0 {
                 led_pin.set_high().unwrap();
@@ -340,7 +356,7 @@ fn setup_midi() {
         if let Some(usb_bus_ref) = USB_BUS.as_ref() {
             MIDI = Mutex::new(RefCell::new(Some(MidiClass::new(usb_bus_ref))));
             USB_DEVICE = Mutex::new(RefCell::new(Some(
-                UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x0000))
+                UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x1248))
                     .product("Loopian-ORBIT")
                     .device_class(USB_CLASS_NONE)
                     .build(),
