@@ -212,7 +212,7 @@ fn main() -> ! {
     exled_1_pin.set_low().unwrap();    //test
 
     let mut err_number: i16;
-    let mut ad_velocity: u16 = 100;
+    let mut ad_velocity: u8 = 100;
     loop {
         free(|cs| {
             lpclk.set_clock(*COUNTER.borrow(cs).borrow());
@@ -268,11 +268,11 @@ fn main() -> ! {
         // ADC
         let pin_adx_value: u16 = adc.read(&mut adc_pin_0).unwrap();
         let pin_ady_value: u16 = adc.read(&mut adc_pin_1).unwrap();
-        let mut ad_vel_temp = if pin_adx_value > pin_ady_value {pin_adx_value} else {pin_ady_value};
-        ad_vel_temp = (ad_vel_temp/40) + 20;
-        if ad_vel_temp != ad_velocity {
-            ad_velocity = ad_vel_temp;
-            Ada88::write_number(ad_vel_temp as i16);
+        let ad_vel_temp = if pin_adx_value > pin_ady_value {pin_adx_value} else {pin_ady_value};
+        let vel_temp = DetectPosition::get_velocity_from_adc(ad_vel_temp);
+        if vel_temp != ad_velocity {
+            ad_velocity = vel_temp;
+            Ada88::write_number(vel_temp as i16);
         }
 
         // Heart beat

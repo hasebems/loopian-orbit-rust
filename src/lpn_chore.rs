@@ -188,8 +188,15 @@ impl DetectPosition {
             notes_all: false,
         }
     }
+    pub fn get_velocity_from_adc(adc: u16) -> u8 {  // adc: 0-4095
+        let ret;
+        if adc > 2100 {ret = (adc/70)+69}
+        else if adc < 1900 {ret = (adc/25)+20}
+        else {ret=98}
+        return ret as u8;
+    }
     pub fn get_1st_position(&self) -> i32 {self.ev[0].locate_target}
-    pub fn update_touch_position(&mut self, swdev: &[SwitchEvent; MAX_DEVICE_MBR3110], vel: u16) -> u8 {
+    pub fn update_touch_position(&mut self, swdev: &[SwitchEvent; MAX_DEVICE_MBR3110], vel: u8) -> u8 {
         let mut new_ev = self.detect_touch(swdev);
         for x in new_ev.iter_mut() {
             if x.locate_target == TouchEvent::NOTHING {break}
@@ -267,14 +274,14 @@ impl DetectPosition {
         }
         new_ev
     }
-    fn generate_midi(note_type: i32, on_note: usize, off_note: usize, vel: u16) -> bool {
+    fn generate_midi(note_type: i32, on_note: usize, off_note: usize, vel: u8) -> bool {
         let mut sccs1 = false;
         let mut sccs2 = false;
         if note_type > 0 {
             sccs2 = output_midi_msg(Message::NoteOn(
                 Channel::Channel1,
                 TouchEvent::U8_TO_NOTE[on_note+Self::OFFSET_NOTE],
-                FromClamped::from_clamped(vel as u8),
+                FromClamped::from_clamped(vel),
             ));
         }
         if note_type != 1 {
