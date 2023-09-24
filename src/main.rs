@@ -57,8 +57,8 @@ use lpn_chore::{
 // 割り込みハンドラからハードウェア制御できるように、static変数にする
 // Mutex<RefCell<Option<共有変数>>> = Mutex::new(RefCell::new(None));
 static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0));
-static mut USB_DEVICE: Mutex<RefCell<Option<UsbDevice<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
-static mut MIDI: Mutex<RefCell<Option<MidiClass<hal::usb::UsbBus>>>> = Mutex::new(RefCell::new(None));
+static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
+static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 
 //*******************************************************************
@@ -74,12 +74,11 @@ fn SysTick() {
 }
 #[interrupt]
 unsafe fn USBCTRL_IRQ() {
-    free(|cs| {
-    if let Some(usb_dev) = USB_DEVICE.borrow(cs).borrow_mut().as_mut() {
-        if let Some(midi) = MIDI.borrow(cs).borrow_mut().as_mut() {
+    if let Some(usb_dev) = USB_DEVICE.as_mut() {
+        if let Some(midi) = MIDI.as_mut() {
             usb_dev.poll(&mut [midi]);
         }
-    }});
+    }
 }
 //*******************************************************************
 //          main
@@ -354,13 +353,14 @@ fn delay_msec(time: u32) {
 fn setup_midi() {
     unsafe {
         if let Some(usb_bus_ref) = USB_BUS.as_ref() {
-            MIDI = Mutex::new(RefCell::new(Some(MidiClass::new(usb_bus_ref))));
-            USB_DEVICE = Mutex::new(RefCell::new(Some(
+            MIDI = Some(MidiClass::new(usb_bus_ref));
+            USB_DEVICE = Some(
                 UsbDeviceBuilder::new(usb_bus_ref, UsbVidPid(0x2e8a, 0x1248))
                     .product("Loopian-ORBIT")
                     .device_class(USB_CLASS_NONE)
                     .build(),
-            )));
+            );
+
             // Enable the USB interrupt
             pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
         }
@@ -370,17 +370,15 @@ fn output_midi_msg(message: Message) -> bool {
     // Send MIDI message
     let mut state: bool = false;
     unsafe {
-        free(|cs| {
-            if let Some(midi) = MIDI.borrow(cs).borrow_mut().as_mut() {
-                match midi.send_message(UsbMidiEventPacket {
-                    cable_number: CableNumber::Cable0,
-                    message,
-                }) {
-                    Ok(_) => state = true,
-                    Err(_) => state = false,
-                }
+        if let Some(midi) = MIDI.as_mut() {
+            match midi.send_message(UsbMidiEventPacket {
+                cable_number: CableNumber::Cable0,
+                message,
+            }) {
+                Ok(_) => state = true,
+                Err(_) => state = false,
             }
-        });
+        }
     }
     delay_msec(1);
     state
