@@ -335,7 +335,7 @@ fn delay_msec(time: u32) {
     let mut diff = 0;
     let mut realtime = 0;
     loop {
-        if diff >= time {
+        if diff > time {
             break;
         }
         free(|cs| {
