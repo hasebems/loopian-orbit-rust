@@ -120,7 +120,7 @@ fn main() -> ! {
     let mut exled_2_pin = pins.gpio18.into_push_pull_output();
     let sw1_pin = pins.gpio14.into_pull_down_input();
     let setup_mode = sw1_pin.is_low().unwrap();
-    whiteled_sw_pin.set_high().unwrap(); // Touch部白色LEDの Mute
+    whiteled_sw_pin.set_low().unwrap(); // Touch部白色LEDの Mute
     exled_err_pin.set_low().unwrap();  // 消灯
     exled_1_pin.set_low().unwrap();    // 消灯
     exled_2_pin.set_low().unwrap();    // 消灯
@@ -208,7 +208,7 @@ fn main() -> ! {
     let mut swevt: [SwitchEvent; MAX_DEVICE_MBR3110] = Default::default();
 
     // Touch部白色LEDの Mute 解除
-    whiteled_sw_pin.set_low().unwrap();
+    whiteled_sw_pin.set_high().unwrap();
     exled_1_pin.set_low().unwrap();    //test
 
     let mut err_number: i16;
