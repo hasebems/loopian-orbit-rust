@@ -50,6 +50,7 @@ use lpn_chore::{
     DetectPosition, LoopClock, PositionLed, SwitchEvent,
     MAX_DEVICE_MBR3110, MAX_TOUCH_EV,
 };
+//use rp2040_hal::gpio::pin,
 
 //*******************************************************************
 //          Global Variable/DEF
@@ -173,7 +174,8 @@ fn main() -> ! {
     let mut available_each_device = [true; MAX_DEVICE_MBR3110];
     if setup_mode {
         Ada88::write_letter(21);// SU
-        exled_err_pin.set_high().unwrap();
+        //let lhi = move || {exled_err_pin.set_high().unwrap()};
+        //let llo = move || {exled_err_pin.set_low().unwrap()};
         check_and_setup_board();
         // 戻ってこない
     } else {
@@ -289,44 +291,31 @@ fn main() -> ! {
 //          System Functions
 //*******************************************************************
 fn check_and_setup_board() {
+
+    // CapSense Setup Mode
+    let mut sup_ok: bool = false;
     for i in 0..MAX_DEVICE_MBR3110 {
         Pca9544::change_i2cbus(0, i);
         let err = Mbr3110::setup_device(i);
-        if err != 0 {
-
+        if err == 0 {
+            Ada88::write_letter(22);    // Ok
+            sup_ok = true;
+            break;
         }
-        else {
-        }
     }
-
-  // CapSense Setup Mode
-  /*bool sup_ok = false;
-
-  for (int i=0; i<MAX_DEVICE_MBR3110; ++i){
-    pca9544_changeI2cBus(0,i);
-    err = MBR3110_setup(i);
-    if (err){
-      digitalWrite(LED_ERR, LOW); // turn on
+    if !sup_ok {
+        Ada88::write_letter(23);    // Er
     }
-    else{
-      ada88_write(22); // "Ok"
-      sup_ok = true;
-      break;
+    delay_msec(2000);       // if something wrong, 2sec LED_ERR on
+
+    for _ in 0..3 {  // when finished, flash 3times.
+        //&llo();
+        delay_msec(100);
+        //&lhi();
+        delay_msec(100);
     }
-  }
-
-  if (!sup_ok){ada88_write(23);} // "Er"
-  delay(2000);          // if something wrong, 2sec LED_ERR on
-
-  for (int i=0; i<3; i++){  // when finished, flash 3times.
-    digitalWrite(LED_ERR, LOW);
-    delay(100);
-    digitalWrite(LED_ERR, HIGH);
-    delay(100);
-  }
-  if (!sup_ok){digitalWrite(LED_ERR, LOW);}*/
-
-
+    //&llo();
+    delay_msec(100);
 
     loop {}
 }
