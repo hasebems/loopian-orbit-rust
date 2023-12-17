@@ -26,29 +26,26 @@ use rp_pico as bsp;
 
 use bsp::hal;
 use bsp::hal::{
-    adc::Adc, adc::AdcPin, clocks::init_clocks_and_plls, pac, pac::interrupt, sio::Sio,
+    adc::Adc, adc::AdcPin, clocks::init_clocks_and_plls, gpio::*, pac, pac::interrupt, sio::Sio,
     watchdog::Watchdog,
 };
 use cortex_m::prelude::_embedded_hal_adc_OneShot;
 
 // for USB MIDI
 use usb_device::{class_prelude::*, prelude::*};
-use usbd_midi::data::midi::{
-    message::Message, //channel::Channel, notes::Note
-};
+use usbd_midi::data::midi::message::Message;
 use usbd_midi::data::usb_midi::{
     cable_number::CableNumber, usb_midi_event_packet::UsbMidiEventPacket,
 };
 use usbd_midi::{
-//    data::byte::from_traits::FromClamped,
+    //    data::byte::from_traits::FromClamped,
     data::usb::constants::USB_CLASS_NONE,
     midi_device::MidiClass,
 };
 
 use i2c_device::{Ada88, Mbr3110, Pca9544, Pca9685};
 use lpn_chore::{
-    DetectPosition, LoopClock, PositionLed, SwitchEvent,
-    MAX_DEVICE_MBR3110, MAX_TOUCH_EV,
+    DetectPosition, LoopClock, PositionLed, SwitchEvent, MAX_DEVICE_MBR3110, MAX_TOUCH_EV,
 };
 //use rp2040_hal::gpio::pin,
 
@@ -62,6 +59,95 @@ static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
 static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 
+static mut PIN_LED: Option<hal::gpio::Pin<crate::bank0::Gpio25, FunctionSio<SioOutput>, PullDown>> =
+    None;
+static mut PIN_J44: Option<hal::gpio::Pin<crate::bank0::Gpio13, FunctionSio<SioInput>, PullDown>> =
+    None;
+static mut PIN_JSTK: Option<hal::gpio::Pin<crate::bank0::Gpio14, FunctionSio<SioInput>, PullDown>> =
+    None;
+static mut PIN_WHITELED_EN: Option<
+    hal::gpio::Pin<crate::bank0::Gpio15, FunctionSio<SioOutput>, PullDown>,
+> = None;
+static mut PIN_LED_ERR: Option<
+    hal::gpio::Pin<crate::bank0::Gpio16, FunctionSio<SioOutput>, PullDown>,
+> = None;
+static mut PIN_LED_1: Option<
+    hal::gpio::Pin<crate::bank0::Gpio17, FunctionSio<SioOutput>, PullDown>,
+> = None;
+static mut PIN_LED_2: Option<
+    hal::gpio::Pin<crate::bank0::Gpio18, FunctionSio<SioOutput>, PullDown>,
+> = None;
+
+fn lederr_off() {
+    unsafe {
+        if let Some(pin_lederr) = &mut PIN_LED_ERR {
+            pin_lederr.set_low().unwrap(); // 消灯
+        }
+    }
+}
+fn lederr_on() {
+    unsafe {
+        if let Some(pin_lederr) = &mut PIN_LED_ERR {
+            pin_lederr.set_high().unwrap();
+        }
+    }
+}
+fn en_whiteled() {
+    unsafe {
+        if let Some(pin_whiteled_en) = &mut PIN_WHITELED_EN {
+            pin_whiteled_en.set_high().unwrap();
+        }
+    }
+}
+fn dis_whiteled() {
+    unsafe {
+        if let Some(pin_whiteled_en) = &mut PIN_WHITELED_EN {
+            pin_whiteled_en.set_low().unwrap(); // Touch部白色LEDの Mute
+        }
+    }
+}
+fn led1_off() {
+    unsafe {
+        if let Some(pin_led) = &mut PIN_LED_1 {
+            pin_led.set_low().unwrap(); // 消灯
+        }
+    }
+}
+fn led1_on() {
+    unsafe {
+        if let Some(pin_led) = &mut PIN_LED_1 {
+            pin_led.set_high().unwrap();
+        }
+    }
+}
+fn led2_off() {
+    unsafe {
+        if let Some(pin_led) = &mut PIN_LED_2 {
+            pin_led.set_low().unwrap(); // 消灯
+        }
+    }
+}
+fn led2_on() {
+    unsafe {
+        if let Some(pin_led) = &mut PIN_LED_2 {
+            pin_led.set_high().unwrap();
+        }
+    }
+}
+fn ledboard_on() {
+    unsafe {
+        if let Some(pin_led) = &mut PIN_LED {
+            pin_led.set_high().unwrap();
+        }
+    }
+}
+fn ledboard_off() {
+    unsafe {
+        if let Some(pin_led) = &mut PIN_LED {
+            pin_led.set_low().unwrap();
+        }
+    }
+}
 //*******************************************************************
 //          interrupt/exception
 //*******************************************************************
@@ -114,17 +200,28 @@ fn main() -> ! {
     );
 
     // GPIO
-    let mut led_pin = pins.led.into_push_pull_output();
-    let mut whiteled_sw_pin = pins.gpio15.into_push_pull_output();
-    let mut exled_err_pin = pins.gpio16.into_push_pull_output();
-    let mut exled_1_pin = pins.gpio17.into_push_pull_output();
-    let mut exled_2_pin = pins.gpio18.into_push_pull_output();
-    let sw1_pin = pins.gpio14.into_pull_down_input();
-    let setup_mode = sw1_pin.is_low().unwrap();
-    whiteled_sw_pin.set_low().unwrap(); // Touch部白色LEDの Mute
-    exled_err_pin.set_low().unwrap();  // 消灯
-    exled_1_pin.set_low().unwrap();    // 消灯
-    exled_2_pin.set_low().unwrap();    // 消灯
+    let mut setup_mode: bool = false;
+    let mut ledchk_mode: bool = false;
+    unsafe {
+        PIN_LED = Some(pins.led.into_push_pull_output());
+        PIN_J44 = Some(pins.gpio13.into_pull_down_input());
+        PIN_JSTK = Some(pins.gpio14.into_pull_down_input());
+        PIN_WHITELED_EN = Some(pins.gpio15.into_push_pull_output());
+        PIN_LED_ERR = Some(pins.gpio16.into_push_pull_output());
+        PIN_LED_1 = Some(pins.gpio17.into_push_pull_output());
+        PIN_LED_2 = Some(pins.gpio18.into_push_pull_output());
+        if let Some(pin_swj44) = &mut PIN_J44 {
+            ledchk_mode = pin_swj44.is_low().unwrap();
+        }
+        if let Some(pin_joysticksw) = &mut PIN_JSTK {
+            setup_mode = pin_joysticksw.is_low().unwrap();
+        }
+    }
+    dis_whiteled();
+    lederr_off();
+    led1_off();
+    led2_off();
+    ledboard_on();
 
     // Enable ADC
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
@@ -173,10 +270,7 @@ fn main() -> ! {
     // Application Setup mode
     let mut available_each_device = [true; MAX_DEVICE_MBR3110];
     if setup_mode {
-        Ada88::write_letter(21);// SU
-        //let lhi = move || {exled_err_pin.set_high().unwrap()};
-        //let llo = move || {exled_err_pin.set_low().unwrap()};
-        check_and_setup_board();
+        check_and_setup_board(ledchk_mode);
         // 戻ってこない
     } else {
         // Normal Mode
@@ -184,7 +278,7 @@ fn main() -> ! {
         for i in 0..MAX_DEVICE_MBR3110 {
             Pca9544::change_i2cbus(0, i);
             let err = Mbr3110::init(i);
-            exled_1_pin.set_high().unwrap();
+            led1_on();
             if err != 0 {
                 available_each_device[i] = false;
                 exist_err = err;
@@ -192,10 +286,15 @@ fn main() -> ! {
         }
         let mut disp_num: i32;
         if exist_err != 0 {
-            exled_err_pin.set_high().unwrap();
-            disp_num = 20 + exist_err; // Error: 19:き, 18:ま, 
-            if disp_num >= 23 { disp_num = 23;}// Er
-            else if disp_num < 0 {disp_num = 0;}
+            lederr_on();
+            disp_num = 20 + exist_err; // Error: 19:き, 18:ま,
+            if disp_num >= 23 {
+                disp_num = 23;
+            }
+            // Er
+            else if disp_num < 0 {
+                disp_num = 0;
+            }
         } else {
             disp_num = 22; // OK
         }
@@ -210,8 +309,8 @@ fn main() -> ! {
     let mut swevt: [SwitchEvent; MAX_DEVICE_MBR3110] = Default::default();
 
     // Touch部白色LEDの Mute 解除
-    whiteled_sw_pin.set_high().unwrap();
-    exled_1_pin.set_low().unwrap();    //test
+    en_whiteled();
+    led1_off(); //test
 
     let mut err_number: i16;
     let mut ad_velocity: u8 = 100;
@@ -234,23 +333,25 @@ fn main() -> ! {
                         }
                         Err(_err) => {
                             info!("Error!");
-                            exled_err_pin.set_high().unwrap();
-                            err_number = (i as i16)*100 + (_err as i16);
+                            lederr_on();
+                            err_number = (i as i16) * 100 + (_err as i16);
                             Ada88::write_number(err_number as i16);
-                        },
+                        }
                     }
                 }
             }
-            if touch_someone {  // switch が押されている
-                exled_2_pin.set_high().unwrap();
+            if touch_someone {
+                // switch が押されている
+                led2_on();
             } else {
-                exled_2_pin.set_low().unwrap();
+                led2_off();
             }
             let finger = dtct.update_touch_position(&swevt, ad_velocity);
-            if finger >= 2 {    //  指を２本検出している
-                exled_1_pin.set_high().unwrap();
+            if finger >= 2 {
+                //  指を２本検出している
+                led1_on();
             } else {
-                exled_1_pin.set_low().unwrap();
+                led1_off();
             }
         }
 
@@ -261,16 +362,19 @@ fn main() -> ! {
         //  display location
         let position = dtct.get_1st_position();
         if position != -1 {
-            Ada88::write_number((position/10) as i16);
-        }
-        else {
+            Ada88::write_number((position / 10) as i16);
+        } else {
             Ada88::write_letter(0);
         }
 
         // ADC
         let pin_adx_value: u16 = adc.read(&mut adc_pin_0).unwrap();
         let pin_ady_value: u16 = adc.read(&mut adc_pin_1).unwrap();
-        let ad_vel_temp = if pin_adx_value > pin_ady_value {pin_adx_value} else {pin_ady_value};
+        let ad_vel_temp = if pin_adx_value > pin_ady_value {
+            pin_adx_value
+        } else {
+            pin_ady_value
+        };
         let vel_temp = DetectPosition::get_velocity_from_adc(ad_vel_temp);
         if vel_temp != ad_velocity {
             ad_velocity = vel_temp;
@@ -280,9 +384,9 @@ fn main() -> ! {
         // Heart beat
         if ev1s {
             if (lpclk.get_ms() / 1000) % 2 == 0 {
-                led_pin.set_high().unwrap();
+                ledboard_on();
             } else {
-                led_pin.set_low().unwrap();
+                ledboard_off();
             }
         }
     }
@@ -290,31 +394,51 @@ fn main() -> ! {
 //*******************************************************************
 //          System Functions
 //*******************************************************************
-fn check_and_setup_board() {
-
-    // CapSense Setup Mode
+fn check_and_setup_board(ledchk_mode: bool) {
     let mut sup_ok: bool = false;
-    for i in 0..MAX_DEVICE_MBR3110 {
-        Pca9544::change_i2cbus(0, i);
-        let err = Mbr3110::setup_device(i);
-        if err == 0 {
-            Ada88::write_letter(22);    // Ok
-            sup_ok = true;
-            break;
+    if ledchk_mode {
+        const MAX_EACH_LIGHT: usize = 16;
+        Ada88::write_letter(2); //"B"
+        delay_msec(200);
+        PositionLed::clear_all();
+        en_whiteled();
+        loop {
+            for l in 0..2 {
+                for e in 0..MAX_EACH_LIGHT {
+                    let bright: u16 = if (e % 2) == 0 { l } else { (l + 1) % 2 };
+                    PositionLed::light_led_each(e, 0, bright * 200);
+                }
+                delay_msec(200);
+            }
+        } //  無限ループ
+    } else {
+        // CapSense Setup Mode
+        Ada88::write_letter(21); // SU
+        for i in 0..MAX_DEVICE_MBR3110 {
+            Pca9544::change_i2cbus(0, i);
+            let err = Mbr3110::setup_device(i);
+            if err == 0 {
+                Ada88::write_letter(22); // Ok
+                sup_ok = true;
+                break;
+            }
         }
     }
-    if !sup_ok {
-        Ada88::write_letter(23);    // Er
-    }
-    delay_msec(2000);       // if something wrong, 2sec LED_ERR on
 
-    for _ in 0..3 {  // when finished, flash 3times.
-        //&llo();
+    if !sup_ok {
+        Ada88::write_letter(23); // Er
+        delay_msec(2000); // if something wrong, 2sec LED_ERR on
+        loop {}
+    }
+
+    for _ in 0..3 {
+        // when finished, flash 3times.
+        lederr_on();
         delay_msec(100);
-        //&lhi();
+        lederr_off();
         delay_msec(100);
     }
-    //&llo();
+    lederr_on();
     delay_msec(100);
 
     loop {}

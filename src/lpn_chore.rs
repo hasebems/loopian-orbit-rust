@@ -401,7 +401,7 @@ impl PositionLed {
             }
         }
     }
-    fn light_led_each(num: usize, dev_num: usize, mut strength: u16) {
+    pub fn light_led_each(num: usize, dev_num: usize, mut strength: u16) {
         // strength=0-4095
         let adrs = (num as u8)* 4 + 0x06;
         if strength > 4095 {
