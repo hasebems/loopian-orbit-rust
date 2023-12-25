@@ -420,6 +420,14 @@ fn check_and_setup_board(ledchk_mode: bool) {
             if err == 0 {
                 Ada88::write_letter(22); // Ok
                 sup_ok = true;
+                for _ in 0..3 {
+                    // when finished, flash 3times.
+                    lederr_on();
+                    delay_msec(100);
+                    lederr_off();
+                    delay_msec(100);
+                }
+                delay_msec(100);
                 break;
             }
         }
@@ -427,19 +435,8 @@ fn check_and_setup_board(ledchk_mode: bool) {
 
     if !sup_ok {
         Ada88::write_letter(23); // Er
-        delay_msec(2000); // if something wrong, 2sec LED_ERR on
-        loop {}
+                                 //lederr_on(); // Err LED on
     }
-
-    for _ in 0..3 {
-        // when finished, flash 3times.
-        lederr_on();
-        delay_msec(100);
-        lederr_off();
-        delay_msec(100);
-    }
-    lederr_on();
-    delay_msec(100);
 
     loop {}
 }

@@ -12,12 +12,13 @@ use panic_probe as _;
 use bsp::hal::{
     clocks::SystemClock,
     gpio::{bank0::*, FunctionI2C, Pin, PullDown},
+    i2c,
     i2c::I2C,
     pac::{I2C0, RESETS},
 };
+use core::option::Option;
 use fugit::RateExtU32;
 use rp_pico as bsp;
-use core::option::Option;
 
 use crate::delay_msec;
 use crate::MAX_DEVICE_MBR3110;
@@ -59,33 +60,33 @@ impl I2cEnv {
     pub fn read_dt<const T: usize>(&mut self, adrs: u8, dt: &[u8]) -> Option<[u8; T]> {
         let mut readbuf: [u8; T] = [0; T];
         match self.i2c_env.write_read(adrs, dt, &mut readbuf) {
-            Err(_err) => {
+            Err(err) => {
+                match err {
+                    i2c::Error::AddressReserved(0x37) => {}
+                    i2c::Error::AddressOutOfRange(0x51) => {}
+                    i2c::Error::InvalidWriteBufferLength => {}
+                    i2c::Error::InvalidReadBufferLength => {}
+                    _ => {}
+                }
                 info!("I2C Wrong!");
                 return None;
-            },
+            }
             _ => return Some(readbuf),
-        }        
+        }
     }
 }
-
 
 pub fn i2c_init(
     i2cn: I2C0,
     sda: Pin<SDAPin, FunctionI2C, PullDown>,
     scl: Pin<SCLPin, FunctionI2C, PullDown>,
     resets: &mut RESETS,
-    sys_clocks: SystemClock,    
+    sys_clocks: SystemClock,
 ) {
     unsafe {
-        I2C_CONCLETE = Some(I2cEnv::set_i2cenv(
-            i2cn,
-            sda,
-            scl,
-            resets,
-            sys_clocks,
-        ));
+        I2C_CONCLETE = Some(I2cEnv::set_i2cenv(i2cn, sda, scl, resets, sys_clocks));
     }
-     /*free(|cs| {
+    /*free(|cs| {
         let i2cc = I2cEnv::set_i2cenv(
             i2cn,
             sda,
@@ -318,7 +319,7 @@ impl Mbr3110 {
     fn reset(i2c_adrs: u8) {
         let i2c_data: [u8; 2] = [CTRL_CMD, POWER_ON_AND_FINISHED];
         delay_msec(15);
-      
+
         unsafe {
             if let Some(i2c) = &mut I2C_CONCLETE {
                 i2c.write_dt(i2c_adrs, &i2c_data);
@@ -360,7 +361,6 @@ impl Mbr3110 {
         if number >= MAX_DEVICE_MBR3110 {
             return -1;
         }
-
         Self::reset(i2c_adrs);
 
         let config_data = &CY8CMBR3110_CONFIG_DATA[number];
@@ -410,10 +410,12 @@ impl Mbr3110 {
             if let Some(i2c) = &mut I2C_CONCLETE {
                 if let Some(rd_dt) = i2c.read_dt::<1>(MBR_I2C_ADDRESS[number], &wt_dt) {
                     Ok(rd_dt[0])
+                } else {
+                    Err(-3)
                 }
-                else {Err(-3)}
+            } else {
+                Err(-1)
             }
-            else {Err(-1)}
         }
     }
     //-------------------------------------------------------------------------
@@ -426,7 +428,7 @@ impl Mbr3110 {
 
         const SENSITIVITY0: u8 = 0x08; //	Register Address
         const SENSITIVITY1: u8 = 0x09; //	Register Address
-        const SENSITIVITY2: u8 = 0x0a; //	Register Address        
+        const SENSITIVITY2: u8 = 0x0a; //	Register Address
         unsafe {
             if let Some(i2c) = &mut I2C_CONCLETE {
                 let mut i2c_data: [u8; 2] = [SENSITIVITY0, reg_data2];
@@ -441,55 +443,78 @@ impl Mbr3110 {
     //-------------------------------------------------------------------------
     pub fn read_touch_sw(number: usize) -> Result<[u8; 2], i32> {
         let mut count = 0;
-        loop { 
+        loop {
             unsafe {
-                if let Some(i2c) = &mut I2C_CONCLETE {          
-                    if let Some(dt) = i2c.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]){
+                if let Some(i2c) = &mut I2C_CONCLETE {
+                    if let Some(dt) = i2c.read_dt::<2>(MBR_I2C_ADDRESS[number], &[BUTTON_STAT]) {
                         return Ok(dt);
                     }
                 }
             }
             count += 1;
-            if count > 10 {return Err(-1)}
+            if count > 10 {
+                return Err(-1);
+            }
             //delay_msec(1);
         }
     }
     //-------------------------------------------------------------------------
-    fn check_write_config(
-        check_sum_l: u8,
-        check_sum_h: u8,
-        crnt_adrs: u8,
-    ) -> i32 {
+    fn check_write_config(check_sum_l: u8, check_sum_h: u8, crnt_adrs: u8) -> i32 {
         unsafe {
             if let Some(i2c) = &mut I2C_CONCLETE {
-                if let Some(rd_dt) = i2c.read_dt::<2>(crnt_adrs, &[CONFIG_CRC]) {
-                    if (rd_dt[0] == check_sum_l) && (rd_dt[1] == check_sum_h) {
-                        return 0;
+                let mut cnt = 0;
+                loop {
+                    if let Some(rd_dt) = i2c.read_dt::<2>(crnt_adrs, &[CONFIG_CRC]) {
+                        if (rd_dt[0] == check_sum_l) && (rd_dt[1] == check_sum_h) {
+                            return 0;
+                        }
                     }
-                    else {return -2}
+                    delay_msec(1);
+                    cnt += 1;
+                    if cnt > 500 {
+                        return -2;
+                    }
                 }
             }
         }
         -1
     }
     //-------------------------------------------------------------------------
-    fn collate_1byte(i2c_adrs: u8, dt: &[u8;1], cdt: u8) -> i32 {
+    fn collate_1byte(i2c_adrs: u8, dt: &[u8; 1], cdt: u8) -> i32 {
         unsafe {
             if let Some(i2c) = &mut I2C_CONCLETE {
-                if let Some(data) = i2c.read_dt::<1>(i2c_adrs, dt) {
-                    if data[0] == cdt {return 0}
-                    else {return -2}
+                let mut cnt = 0;
+                loop {
+                    if let Some(data) = i2c.read_dt::<1>(i2c_adrs, dt) {
+                        if data[0] == cdt {
+                            return 0;
+                        }
+                    }
+                    delay_msec(1);
+                    cnt += 1;
+                    if cnt > 500 {
+                        return -2;
+                    }
                 }
             }
         }
         -1
     }
-    fn collate_2bytes(i2c_adrs: u8, dt: &[u8;1], cdt1: u8, cdt2: u8) -> i32 {
+    fn collate_2bytes(i2c_adrs: u8, dt: &[u8; 1], cdt1: u8, cdt2: u8) -> i32 {
         unsafe {
-           if let Some(i2c) = &mut I2C_CONCLETE {
-                if let Some(data) = i2c.read_dt::<2>(i2c_adrs, dt) {
-                    if data[0] == cdt1 && data[1] == cdt2 {return 0}
-                    else {return -2}
+            if let Some(i2c) = &mut I2C_CONCLETE {
+                let mut cnt = 0;
+                loop {
+                    if let Some(data) = i2c.read_dt::<2>(i2c_adrs, dt) {
+                        if data[0] == cdt1 && data[1] == cdt2 {
+                            return 0;
+                        }
+                    }
+                    delay_msec(1);
+                    cnt += 1;
+                    if cnt > 500 {
+                        return -2;
+                    }
                 }
             }
         }
@@ -499,10 +524,15 @@ impl Mbr3110 {
         unsafe {
             if let Some(i2c) = &mut I2C_CONCLETE {
                 if let Some(data) = i2c.read_dt::<1>(i2c_adrs, &[CTRL_CMD_ERR]) {
-                    if data[0] == 0xfe      {return -4;}    //  bad check sum
-                    else if data[0] == 0xff {return -5;}    //  invalid command
-                    else if data[0] == 0xfd {return -6;}    //  failed to write flash
-                    else {return 0}
+                    if data[0] == 0xfe {
+                        return -4; //  bad check sum
+                    } else if data[0] == 0xff {
+                        return -5; //  invalid command
+                    } else if data[0] == 0xfd {
+                        return -6; //  failed to write flash
+                    } else {
+                        return 0;
+                    }
                 }
             }
         }
@@ -562,14 +592,20 @@ impl Mbr3110 {
             if let Some(i2c) = &mut I2C_CONCLETE {
                 let wrt_dt = [CTRL_CMD_ERR];
                 if let Some(data) = i2c.read_dt::<1>(i2c_adrs, &wrt_dt) {
-                    if data[0] == 0xfe      {return -4;}    //  bad check sum
-                    else if data[0] == 0xff {return -5;}    //  invalid command
-                    else if data[0] == 0xfd {return -6;}    //  failed to write flash
-                    else { /* OK */}
+                    if data[0] == 0xfe {
+                        return -4; //  bad check sum
+                    } else if data[0] == 0xff {
+                        return -5; //  invalid command
+                    } else if data[0] == 0xfd {
+                        return -6; //  failed to write flash
+                    } else { /* OK */
+                    }
+                } else {
+                    return -1;
                 }
-                else {return -1}
+            } else {
+                return -1;
             }
-            else {return -1}
         }
 
         unsafe {
@@ -598,10 +634,12 @@ impl Mbr3110 {
                         }
                     }
                     /* OK */
+                } else {
+                    return -1;
                 }
-                else {return -1;}
+            } else {
+                return -1;
             }
-            else {return -1;}
         }
         0
     }
@@ -777,11 +815,7 @@ impl Pca9685 {
     //-------------------------------------------------------------------------
     //		rNum, gNum, bNum : 0 - 4094  bigger, brighter
     //-------------------------------------------------------------------------
-    pub fn _set_fullcolor_led(
-        chip_number: usize,
-        mut led_num: u8,
-        color: &[u16; 3],
-    ) {
+    pub fn _set_fullcolor_led(chip_number: usize, mut led_num: u8, color: &[u16; 3]) {
         while led_num > 4 {
             led_num -= 4;
         }
