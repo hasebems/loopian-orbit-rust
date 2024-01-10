@@ -75,7 +75,7 @@ static mut PIN_LED_1: Option<
     hal::gpio::Pin<crate::bank0::Gpio17, FunctionSio<SioOutput>, PullDown>,
 > = None;
 static mut PIN_LED_2: Option<
-    hal::gpio::Pin<crate::bank0::Gpio18, FunctionSio<SioOutput>, PullDown>,
+    hal::gpio::Pin<crate::bank0::Gpio22, FunctionSio<SioOutput>, PullDown>,
 > = None;
 
 fn lederr_off() {
@@ -209,7 +209,7 @@ fn main() -> ! {
         PIN_WHITELED_EN = Some(pins.gpio15.into_push_pull_output());
         PIN_LED_ERR = Some(pins.gpio16.into_push_pull_output());
         PIN_LED_1 = Some(pins.gpio17.into_push_pull_output());
-        PIN_LED_2 = Some(pins.gpio18.into_push_pull_output());
+        PIN_LED_2 = Some(pins.gpio22.into_push_pull_output());
         if let Some(pin_swj44) = &mut PIN_J44 {
             ledchk_mode = pin_swj44.is_low().unwrap();
         }
@@ -240,19 +240,26 @@ fn main() -> ! {
     core.SYST.enable_counter();
 
     // I2C
-    i2c_device::i2c_init(
+    i2c_device::i2c0_init(
         pac.I2C0,
         pins.gpio20.into_function(),
         pins.gpio21.into_function(),
         &mut pac.RESETS,
-        clocks.system_clock,
+        &clocks.system_clock,
     );
+//    i2c_device::i2c1_init(
+//        pac.I2C1,
+//        pins.gpio18.into_function(),
+//        pins.gpio19.into_function(),
+//        &mut pac.RESETS,
+//        &clocks.system_clock,
+//    );
     Ada88::init();
     Ada88::write_letter(1);
     for i in 0..MAX_DEVICE_MBR3110 {
-        Pca9544::change_i2cbus(3, i);
-        Pca9685::init(0);
-        Pca9544::change_i2cbus(1, i);
+        Pca9544::change_i2cbus(0, 3, i);
+        Pca9685::init(0, 0);
+        Pca9544::change_i2cbus(0, 1, i);
     }
 
     // USB MIDI
@@ -276,7 +283,7 @@ fn main() -> ! {
         // Normal Mode
         let mut exist_err = 0;
         for i in 0..MAX_DEVICE_MBR3110 {
-            Pca9544::change_i2cbus(0, i);
+            Pca9544::change_i2cbus(0, 0, i);
             let err = Mbr3110::init(i);
             led1_on();
             if err != 0 {
@@ -326,8 +333,8 @@ fn main() -> ! {
             let mut touch_someone = false;
             for i in 0..MAX_DEVICE_MBR3110 {
                 if available_each_device[i] {
-                    Pca9544::change_i2cbus(0, i);
-                    match Mbr3110::read_touch_sw(i) {
+                    Pca9544::change_i2cbus(0, 0, i);
+                    match Mbr3110::read_touch_sw(0, i) {
                         Ok(sw) => {
                             touch_someone |= swevt[i].update_sw_event(sw, tm);
                         }
@@ -415,7 +422,7 @@ fn check_and_setup_board(ledchk_mode: bool) {
         // CapSense Setup Mode
         Ada88::write_letter(21); // SU
         for i in 0..MAX_DEVICE_MBR3110 {
-            Pca9544::change_i2cbus(0, i);
+            Pca9544::change_i2cbus(0, 0, i);
             let err = Mbr3110::setup_device(i);
             if err == 0 {
                 Ada88::write_letter(22); // Ok

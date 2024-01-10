@@ -407,12 +407,12 @@ impl PositionLed {
         if strength > 4095 {
             strength = 4095;
         }
-        Pca9544::change_i2cbus(3, dev_num);
-        Pca9685::write(0, adrs, 0); // ONはtime=0
-        Pca9685::write(0, adrs + 1, 0); // ONはtime=0
-        Pca9685::write(0, adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
-        Pca9685::write(0, adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
+        Pca9544::change_i2cbus(0, 3, dev_num);
+        Pca9685::write(0, 0, adrs, 0); // ONはtime=0
+        Pca9685::write(0, 0, adrs + 1, 0); // ONはtime=0
+        Pca9685::write(0, 0, adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
+        Pca9685::write(0, 0, adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
         // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
-        Pca9544::change_i2cbus(1, dev_num);
+        Pca9544::change_i2cbus(0, 1, dev_num);
     }
 }
