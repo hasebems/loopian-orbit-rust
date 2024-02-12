@@ -258,7 +258,7 @@ fn main() -> ! {
     Ada88::write_letter(1);
     for i in 0..MAX_DEVICE_MBR3110 {
         Pca9544::change_i2cbus(0, 3, i);
-        Pca9685::init(0, 0);
+        Pca9685::init(0, i + 16);
         Pca9544::change_i2cbus(0, 1, i);
     }
 

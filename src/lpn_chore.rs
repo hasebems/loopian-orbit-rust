@@ -403,16 +403,16 @@ impl PositionLed {
     }
     pub fn light_led_each(num: usize, dev_num: usize, mut strength: u16) {
         // strength=0-4095
-        let adrs = (num as u8)* 4 + 0x06;
+        let reg_adrs = (num as u8) * 4 + 0x06;
+        let i2c_adrs = dev_num + 16;
         if strength > 4095 {
             strength = 4095;
         }
         Pca9544::change_i2cbus(0, 3, dev_num);
-        Pca9685::write(0, 0, adrs, 0); // ONはtime=0
-        Pca9685::write(0, 0, adrs + 1, 0); // ONはtime=0
-        Pca9685::write(0, 0, adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
-        Pca9685::write(0, 0, adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
-        // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
-        Pca9544::change_i2cbus(0, 1, dev_num);
+        Pca9685::write(0, i2c_adrs, reg_adrs, 0); // ONはtime=0
+        Pca9685::write(0, i2c_adrs, reg_adrs + 1, 0); // ONはtime=0
+        Pca9685::write(0, i2c_adrs, reg_adrs + 2, (strength & 0x00ff) as u8); // OFF 0-4095 (0-0x0fff) の下位8bit
+        Pca9685::write(0, i2c_adrs, reg_adrs + 3, (strength >> 8) as u8); // OFF 上位4bit
+        Pca9544::change_i2cbus(0, 1, dev_num); // 別のI2Cバスに変えないと、他のkamanumのときに上書きされてしまう
     }
 }
