@@ -5,10 +5,10 @@
 //
 use crate::i2c_device::{/*Ada88,*/ Pca9544, Pca9685};
 
-pub const MAX_DEVICE_MBR3110: usize = 6;
+pub const MAX_DEVICE_MBR3110: usize = 12;
 pub const MAX_ELECTRODE_PER_DEV: usize = 8;
 pub const MAX_EACH_LIGHT: usize = 16;
-pub const MAX_NOTE: usize = MAX_DEVICE_MBR3110*16;
+pub const MAX_NOTE: usize = MAX_DEVICE_MBR3110 * 8;
 
 pub const MAX_TOUCH_EV: usize = 8;
 pub const MAX_EACH_SENS: usize = 8;
