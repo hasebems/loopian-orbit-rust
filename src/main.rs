@@ -247,13 +247,13 @@ fn main() -> ! {
         &mut pac.RESETS,
         &clocks.system_clock,
     );
-//    i2c_device::i2c1_init(
-//        pac.I2C1,
-//        pins.gpio18.into_function(),
-//        pins.gpio19.into_function(),
-//        &mut pac.RESETS,
-//        &clocks.system_clock,
-//    );
+    //    i2c_device::i2c1_init(
+    //        pac.I2C1,
+    //        pins.gpio18.into_function(),
+    //        pins.gpio19.into_function(),
+    //        &mut pac.RESETS,
+    //        &clocks.system_clock,
+    //    );
     Ada88::init();
     Ada88::write_letter(1);
     for i in 0..MAX_DEVICE_MBR3110 {

@@ -14,7 +14,7 @@ use bsp::hal::{
     gpio::{bank0::*, FunctionI2C, Pin, PullDown},
     i2c,
     i2c::I2C,
-    pac::{I2C0, I2C1, RESETS},
+    pac::{I2C0, RESETS},
 };
 use core::option::Option;
 use fugit::RateExtU32;
@@ -28,14 +28,14 @@ use crate::MAX_DEVICE_MBR3110;
 //*******************************************************************
 type SDA0Pin = Gpio20;
 type SCL0Pin = Gpio21;
-type SDA1Pin = Gpio18;
-type SCL1Pin = Gpio19;
+//type SDA1Pin = Gpio18;
+//type SCL1Pin = Gpio19;
 type I2c0Env = I2C<I2C0,(Pin<SDA0Pin, FunctionI2C, PullDown>,Pin<SCL0Pin, FunctionI2C, PullDown>,),>;
-type I2c1Env = I2C<I2C1,(Pin<SDA1Pin, FunctionI2C, PullDown>,Pin<SCL1Pin, FunctionI2C, PullDown>,),>;
+//type I2c1Env = I2C<I2C1,(Pin<SDA1Pin, FunctionI2C, PullDown>,Pin<SCL1Pin, FunctionI2C, PullDown>,),>;
 pub struct I2cAdrs(u8, u8);
 //-------------------------------------------------------------------------
 static mut I2C_CONCLETE0: Option<I2c0Env> = None;
-static mut I2C_CONCLETE1: Option<I2c1Env> = None;
+//static mut I2C_CONCLETE1: Option<I2c1Env> = None;
 //*******************************************************************
 //          I2C device Access IF
 //*******************************************************************
@@ -72,7 +72,7 @@ pub fn i2c0_init(
         *I2C_CONCLETE.borrow(cs) = Some(i2cc);
     });*/
 }
-pub fn i2c1_init(
+/*pub fn i2c1_init(
     i2c: I2C1,
     sda: Pin<SDA1Pin, FunctionI2C, PullDown>,
     scl: Pin<SCL1Pin, FunctionI2C, PullDown>,
@@ -90,31 +90,31 @@ pub fn i2c1_init(
         );
         I2C_CONCLETE1 = Some(i2c_env);
     }
-}
+}*/
 //-------------------------------------------------------------------------
 pub fn i2c_write(i2c_adrs: &I2cAdrs, i2c_data: &[u8]) {
     unsafe {
-        if i2c_adrs.0 == 0 {
+//        if i2c_adrs.0 == 0 {
             if let Some(i2c_env) = &mut I2C_CONCLETE0 {
                 match i2c_env.write(i2c_adrs.1, i2c_data) {
                     Err(_err) => info!("I2C Wrong!"),
                     _ => (),
                 }
             }
-        } else {
-            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
-                match i2c_env.write(i2c_adrs.1, i2c_data) {
-                    Err(_err) => info!("I2C Wrong!"),
-                    _ => (),
-                }
-            }
-        }
+//        } else {
+//            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
+//                match i2c_env.write(i2c_adrs.1, i2c_data) {
+//                    Err(_err) => info!("I2C Wrong!"),
+//                    _ => (),
+//                }
+//            }
+//        }
     };
 }
 //-------------------------------------------------------------------
 pub fn i2c_read<const T: usize>(i2c_adrs: &I2cAdrs, i2c_data: &[u8]) -> Option<[u8; T]> {
     unsafe {
-        if i2c_adrs.0 == 0 {
+//        if i2c_adrs.0 == 0 {
             if let Some(i2c_env) = &mut I2C_CONCLETE0 {
                 let mut readbuf: [u8; T] = [0; T];
                 match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
@@ -132,25 +132,25 @@ pub fn i2c_read<const T: usize>(i2c_adrs: &I2cAdrs, i2c_data: &[u8]) -> Option<[
                     _ => return Some(readbuf),
                 }
             }
-        } else {
-            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
-                let mut readbuf: [u8; T] = [0; T];
-                match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
-                    Err(err) => {
-                        match err {
-                            i2c::Error::AddressReserved(0x37) => {}
-                            i2c::Error::AddressOutOfRange(0x51) => {}
-                            i2c::Error::InvalidWriteBufferLength => {}
-                            i2c::Error::InvalidReadBufferLength => {}
-                            _ => {}
-                        }
-                        info!("I2C Wrong!");
-                        return None;
-                    }
-                    _ => return Some(readbuf),
-                }
-            }
-        }
+//        } else {
+//            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
+//                let mut readbuf: [u8; T] = [0; T];
+//                match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
+//                    Err(err) => {
+//                        match err {
+//                            i2c::Error::AddressReserved(0x37) => {}
+//                            i2c::Error::AddressOutOfRange(0x51) => {}
+//                            i2c::Error::InvalidWriteBufferLength => {}
+//                            i2c::Error::InvalidReadBufferLength => {}
+//                            _ => {}
+//                        }
+//                        info!("I2C Wrong!");
+//                        return None;
+//                    }
+//                    _ => return Some(readbuf),
+//                }
+//            }
+//        }
         return None;
     };
 }
