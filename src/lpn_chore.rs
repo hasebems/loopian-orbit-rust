@@ -5,13 +5,13 @@
 //
 use crate::i2c_device::{/*Ada88,*/ Pca9544, Pca9685};
 
-pub const MAX_DEVICE_MBR3110: usize = 12;
+pub const MAX_KAMABOKO_NUM: usize = 12; // 1system あたりの KAMABOKO(Sensor Chip: MBR3110) の数
 pub const MAX_ELECTRODE_PER_DEV: usize = 8;
 pub const MAX_EACH_LIGHT: usize = 16;
-pub const MAX_NOTE: usize = MAX_DEVICE_MBR3110 * 8;
+pub const MAX_NOTE: usize = 96; // 1system が取りうる最大 Note 番号
 
 pub const MAX_TOUCH_EV: usize = 8;
-pub const MAX_EACH_SENS: usize = 8;
+pub const MAX_EACH_SENS: usize = 8; // 一つの Holder にあるセンサーの数
 
 use usbd_midi::data::byte::from_traits::FromClamped;
 use usbd_midi::data::midi::{channel::Channel, message::Message, notes::Note};
@@ -121,7 +121,8 @@ impl SwitchEvent {
 //*******************************************************************
 #[derive(Clone, Copy)]
 pub struct TouchEvent {
-    locate_current: i32, // -1, 0 - 9599 (16*6*100 - 1)
+    // 0 - 9599 は、タッチスイッチの取りうる全領域を表す
+    locate_current: i32, // -1, 0 - 9599
     locate_target: i32,  // -1, 0 - 9599
     mintch_locate: i32,  // -1, 0 - 47 (8*6 - 1)
     maxtch_locate: i32,  // -1, 0 - 47
@@ -212,7 +213,7 @@ impl DetectPosition {
     }
     pub fn update_touch_position(
         &mut self,
-        swdev: &[SwitchEvent; MAX_DEVICE_MBR3110],
+        swdev: &[SwitchEvent; MAX_KAMABOKO_NUM],
         vel: u8,
     ) -> u8 {
         let mut new_ev = self.detect_touch(swdev);
@@ -268,27 +269,28 @@ impl DetectPosition {
     }
     fn detect_touch(
         &mut self,
-        swdev: &[SwitchEvent; MAX_DEVICE_MBR3110],
+        swdev: &[SwitchEvent; MAX_KAMABOKO_NUM],
     ) -> [TouchEvent; MAX_TOUCH_EV] {
         let mut start: bool = false;
         let mut new_ev: [TouchEvent; MAX_TOUCH_EV] = [Default::default(); MAX_TOUCH_EV];
         let mut ev: usize = 0;
+        const MAKE_POSITION: i32 = 9600 / ((MAX_KAMABOKO_NUM as i32) * (MAX_EACH_SENS as i32) * 2);
 
-        for idx in 0..MAX_DEVICE_MBR3110 * MAX_EACH_SENS {
+        for idx in 0..MAX_KAMABOKO_NUM * MAX_EACH_SENS {
             let which_dev = idx / MAX_EACH_SENS;
             let each_sw = idx % MAX_EACH_SENS;
             let mut end_tch = |last: usize| {
+                // 一番番号の若いセンサ(mintch_locate)と、番号の大きいセンサ(last_tch)の真ん中の値を格納
                 let last_tch = last as i32;
                 new_ev[ev].maxtch_locate = last_tch;
-                new_ev[ev].locate_target = (new_ev[ev].mintch_locate + last_tch) * 100;
-                // /2 *200
+                new_ev[ev].locate_target = (new_ev[ev].mintch_locate + last_tch) * MAKE_POSITION;
             };
             if swdev[which_dev].sw[each_sw] != SwitchEvent::OFF {
                 if !start {
                     // 今On、これまでOff
                     start = true;
                     new_ev[ev].mintch_locate = idx as i32;
-                } else if idx == MAX_DEVICE_MBR3110 * MAX_EACH_SENS - 1 {
+                } else if idx == MAX_KAMABOKO_NUM * MAX_EACH_SENS - 1 {
                     // 一番右まで On だったら
                     end_tch(idx);
                 }
@@ -356,8 +358,8 @@ impl DetectPosition {
 pub struct PositionLed {
     total_time: u32,
     fade_counter: u32,
-    light_lvl: [i32; MAX_EACH_LIGHT * MAX_DEVICE_MBR3110],
-    light_lvl_itp: [i32; MAX_EACH_LIGHT * MAX_DEVICE_MBR3110],
+    light_lvl: [i32; MAX_EACH_LIGHT * MAX_KAMABOKO_NUM],
+    light_lvl_itp: [i32; MAX_EACH_LIGHT * MAX_KAMABOKO_NUM],
 }
 impl PositionLed {
     const FADE_RATE: u32 = 5;
@@ -366,12 +368,12 @@ impl PositionLed {
         Self {
             total_time: 0,
             fade_counter: 0,
-            light_lvl: [0; MAX_EACH_LIGHT * MAX_DEVICE_MBR3110],
-            light_lvl_itp: [0; MAX_EACH_LIGHT * MAX_DEVICE_MBR3110],
+            light_lvl: [0; MAX_EACH_LIGHT * MAX_KAMABOKO_NUM],
+            light_lvl_itp: [0; MAX_EACH_LIGHT * MAX_KAMABOKO_NUM],
         }
     }
     pub fn clear_all() {
-        for i in 0..MAX_DEVICE_MBR3110 {
+        for i in 0..MAX_KAMABOKO_NUM {
             for j in 0..MAX_EACH_LIGHT {
                 Self::light_led_each(j, i, 0);
             }
@@ -386,7 +388,7 @@ impl PositionLed {
         }
 
         // Touch 位置を光らせる
-        self.light_lvl = [0; MAX_EACH_LIGHT * MAX_DEVICE_MBR3110];
+        self.light_lvl = [0; MAX_EACH_LIGHT * MAX_KAMABOKO_NUM];
         let mut _max_ev: i32 = 0;
         for i in 0..MAX_TOUCH_EV {
             if tchev[i] == TouchEvent::NOTHING {
@@ -414,7 +416,7 @@ impl PositionLed {
         }
 
         // 各かまぼこのLED点灯処理
-        for k in 0..MAX_DEVICE_MBR3110 {
+        for k in 0..MAX_KAMABOKO_NUM {
             self.one_kamaboco(k);
         }
         if self.fade_counter == 0 {

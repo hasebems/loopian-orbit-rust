@@ -21,7 +21,6 @@ use fugit::RateExtU32;
 use rp_pico as bsp;
 
 use crate::delay_msec;
-use crate::MAX_DEVICE_MBR3110;
 
 //*******************************************************************
 //          I2C Environment
@@ -30,7 +29,13 @@ type SDA0Pin = Gpio20;
 type SCL0Pin = Gpio21;
 //type SDA1Pin = Gpio18;
 //type SCL1Pin = Gpio19;
-type I2c0Env = I2C<I2C0,(Pin<SDA0Pin, FunctionI2C, PullDown>,Pin<SCL0Pin, FunctionI2C, PullDown>,),>;
+type I2c0Env = I2C<
+    I2C0,
+    (
+        Pin<SDA0Pin, FunctionI2C, PullDown>,
+        Pin<SCL0Pin, FunctionI2C, PullDown>,
+    ),
+>;
 //type I2c1Env = I2C<I2C1,(Pin<SDA1Pin, FunctionI2C, PullDown>,Pin<SCL1Pin, FunctionI2C, PullDown>,),>;
 pub struct I2cAdrs(u8, u8);
 //-------------------------------------------------------------------------
@@ -50,14 +55,7 @@ pub fn i2c0_init(
 ) {
     unsafe {
         {
-            let i2c_env = I2C::i2c0(
-                i2c,
-                sda,
-                scl,
-                400_u32.kHz(),
-                resets,
-                system_clock,
-            );
+            let i2c_env = I2C::i2c0(i2c, sda, scl, 400_u32.kHz(), resets, system_clock);
             I2C_CONCLETE0 = Some(i2c_env);
         }
     }
@@ -81,7 +79,7 @@ pub fn i2c0_init(
 ) {
     unsafe {
         let i2c_env = I2C::i2c1(
-            i2c,                                                                                                                                                                                                                                                                                                                                                                                                                                           
+            i2c,
             sda,
             scl,
             400_u32.kHz(),
@@ -94,73 +92,72 @@ pub fn i2c0_init(
 //-------------------------------------------------------------------------
 pub fn i2c_write(i2c_adrs: &I2cAdrs, i2c_data: &[u8]) {
     unsafe {
-//        if i2c_adrs.0 == 0 {
-            if let Some(i2c_env) = &mut I2C_CONCLETE0 {
-                match i2c_env.write(i2c_adrs.1, i2c_data) {
-                    Err(_err) => info!("I2C Wrong!"),
-                    _ => (),
-                }
+        //        if i2c_adrs.0 == 0 {
+        if let Some(i2c_env) = &mut I2C_CONCLETE0 {
+            match i2c_env.write(i2c_adrs.1, i2c_data) {
+                Err(_err) => info!("I2C Wrong!"),
+                _ => (),
             }
-//        } else {
-//            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
-//                match i2c_env.write(i2c_adrs.1, i2c_data) {
-//                    Err(_err) => info!("I2C Wrong!"),
-//                    _ => (),
-//                }
-//            }
-//        }
+        }
+        //        } else {
+        //            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
+        //                match i2c_env.write(i2c_adrs.1, i2c_data) {
+        //                    Err(_err) => info!("I2C Wrong!"),
+        //                    _ => (),
+        //                }
+        //            }
+        //        }
     };
 }
 //-------------------------------------------------------------------
 pub fn i2c_read<const T: usize>(i2c_adrs: &I2cAdrs, i2c_data: &[u8]) -> Option<[u8; T]> {
     unsafe {
-//        if i2c_adrs.0 == 0 {
-            if let Some(i2c_env) = &mut I2C_CONCLETE0 {
-                let mut readbuf: [u8; T] = [0; T];
-                match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
-                    Err(err) => {
-                        match err {
-                            i2c::Error::AddressReserved(0x37) => {}
-                            i2c::Error::AddressOutOfRange(0x51) => {}
-                            i2c::Error::InvalidWriteBufferLength => {}
-                            i2c::Error::InvalidReadBufferLength => {}
-                            _ => {}
-                        }
-                        info!("I2C Wrong!");
-                        return None;
+        //        if i2c_adrs.0 == 0 {
+        if let Some(i2c_env) = &mut I2C_CONCLETE0 {
+            let mut readbuf: [u8; T] = [0; T];
+            match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
+                Err(err) => {
+                    match err {
+                        i2c::Error::AddressReserved(0x37) => {}
+                        i2c::Error::AddressOutOfRange(0x51) => {}
+                        i2c::Error::InvalidWriteBufferLength => {}
+                        i2c::Error::InvalidReadBufferLength => {}
+                        _ => {}
                     }
-                    _ => return Some(readbuf),
+                    info!("I2C Wrong!");
+                    return None;
                 }
+                _ => return Some(readbuf),
             }
-//        } else {
-//            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
-//                let mut readbuf: [u8; T] = [0; T];
-//                match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
-//                    Err(err) => {
-//                        match err {
-//                            i2c::Error::AddressReserved(0x37) => {}
-//                            i2c::Error::AddressOutOfRange(0x51) => {}
-//                            i2c::Error::InvalidWriteBufferLength => {}
-//                            i2c::Error::InvalidReadBufferLength => {}
-//                            _ => {}
-//                        }
-//                        info!("I2C Wrong!");
-//                        return None;
-//                    }
-//                    _ => return Some(readbuf),
-//                }
-//            }
-//        }
+        }
+        //        } else {
+        //            if let Some(i2c_env) = &mut I2C_CONCLETE1 {
+        //                let mut readbuf: [u8; T] = [0; T];
+        //                match i2c_env.write_read(i2c_adrs.1, i2c_data, &mut readbuf) {
+        //                    Err(err) => {
+        //                        match err {
+        //                            i2c::Error::AddressReserved(0x37) => {}
+        //                            i2c::Error::AddressOutOfRange(0x51) => {}
+        //                            i2c::Error::InvalidWriteBufferLength => {}
+        //                            i2c::Error::InvalidReadBufferLength => {}
+        //                            _ => {}
+        //                        }
+        //                        info!("I2C Wrong!");
+        //                        return None;
+        //                    }
+        //                    _ => return Some(readbuf),
+        //                }
+        //            }
+        //        }
         return None;
     };
 }
 //*******************************************************************
 //          CY8CMBR3110 Touch Sensor
 //*******************************************************************
-//const MAX_DEVICE_MBR3110: usize = 6;
-
 const CONFIG_DATA_OFFSET: u8 = 0;
 const CONFIG_DATA_SZ: usize = 128;
+const MAX_DEVICE_NUM: usize = 12;
 
 const _SENSOR_EN: u8 = 0x00; //	Register Address
 const I2C_ADDR: u8 = 0x51; //	Register Address
@@ -184,7 +181,7 @@ const _SNS_GND_SHORT: u8 = 0x9c; //	Register Address
 const BUTTON_STAT: u8 = 0xaa; //	Register Address
 
 const CAP_SENSE_ADDRESS_ORG: u8 = 0x37; //  Factory-Set
-const MBR_I2C_ADDRESS: [u8; 12] = [
+const MBR_I2C_ADDRESS: [u8; MAX_DEVICE_NUM] = [
     0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40, 0x41, 0x42, 0x43,
 ];
 
@@ -194,7 +191,7 @@ const MBR_I2C_ADDRESS: [u8; 12] = [
 //
 /*----------------------------------------------------------------------------*/
 // wide range small resolution
-const CY8CMBR3110_CONFIG_DATA: [[u8; CONFIG_DATA_SZ]; 12] = [
+const CY8CMBR3110_CONFIG_DATA: [[u8; CONFIG_DATA_SZ]; MAX_DEVICE_NUM] = [
     [
         /* Project: C:\Users\hasebems\Documents\Cypress Projects\Design0602\Design0602.cprj
          * Generated: 2019/06/02 6:52:53 +09:00 */
@@ -374,7 +371,7 @@ impl Mbr3110 {
     }
     //-------------------------------------------------------------------------
     pub fn init(number: usize) -> i32 {
-        if number >= MAX_DEVICE_MBR3110 {
+        if number >= MAX_DEVICE_NUM {
             return -1;
         }
 
@@ -402,7 +399,7 @@ impl Mbr3110 {
     //-------------------------------------------------------------------------
     pub fn setup_device(number: usize) -> i32 {
         let i2c_adrs: u8 = MBR_I2C_ADDRESS[number];
-        if number >= MAX_DEVICE_MBR3110 {
+        if number >= MAX_DEVICE_NUM {
             return -1;
         }
         Self::reset(&I2cAdrs(0, i2c_adrs));
@@ -452,8 +449,7 @@ impl Mbr3110 {
         let adrs = I2cAdrs(0, MBR_I2C_ADDRESS[number]);
         if let Some(dt) = i2c_read::<1>(&adrs, &wt_dt) {
             Ok(dt[0])
-        }
-        else {
+        } else {
             Err(-3)
         }
     }
@@ -479,7 +475,7 @@ impl Mbr3110 {
         let mut count = 0;
         loop {
             if let Some(dt) = i2c_read::<2>(&adrs, &[BUTTON_STAT]) {
-                return Ok(dt)
+                return Ok(dt);
             }
             count += 1;
             if count > 10 {
@@ -545,9 +541,9 @@ impl Mbr3110 {
         match i2c_read::<1>(&adrs, &[CTRL_CMD_ERR]) {
             Some(rdt) => {
                 match rdt[0] {
-                    0xfe => -4,   //  bad check sum
-                    0xff => -5,   //  invalid command
-                    0xfd => -6,   //  failed to write flash
+                    0xfe => -4, //  bad check sum
+                    0xff => -5, //  invalid command
+                    0xfd => -6, //  failed to write flash
                     _ => 0,
                 }
             }
@@ -625,8 +621,7 @@ impl Mbr3110 {
                 }
             }
             // thru
-        }
-        else {
+        } else {
             return -1;
         }
         0

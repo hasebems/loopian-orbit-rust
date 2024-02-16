@@ -45,7 +45,7 @@ use usbd_midi::{
 
 use i2c_device::{Ada88, Mbr3110, Pca9544, Pca9685};
 use lpn_chore::{
-    DetectPosition, LoopClock, PositionLed, SwitchEvent, MAX_DEVICE_MBR3110, MAX_TOUCH_EV,
+    DetectPosition, LoopClock, PositionLed, SwitchEvent, MAX_KAMABOKO_NUM, MAX_TOUCH_EV,
 };
 //use rp2040_hal::gpio::pin,
 
@@ -256,7 +256,7 @@ fn main() -> ! {
     //    );
     Ada88::init();
     Ada88::write_letter(1);
-    for i in 0..MAX_DEVICE_MBR3110 {
+    for i in 0..MAX_KAMABOKO_NUM {
         Pca9544::change_i2cbus(0, 3, i);
         Pca9685::init(0, i + 16);
         Pca9544::change_i2cbus(0, 1, i);
@@ -275,14 +275,14 @@ fn main() -> ! {
     setup_midi();
 
     // Application Setup mode
-    let mut available_each_device = [true; MAX_DEVICE_MBR3110];
+    let mut available_each_device = [true; MAX_KAMABOKO_NUM];
     if setup_mode {
         check_and_setup_board(ledchk_mode);
         // 戻ってこない
     } else {
         // Normal Mode
         let mut exist_err = 0;
-        for i in 0..MAX_DEVICE_MBR3110 {
+        for i in 0..MAX_KAMABOKO_NUM {
             Pca9544::change_i2cbus(0, 0, i);
             let err = Mbr3110::init(i);
             led1_on();
@@ -313,7 +313,7 @@ fn main() -> ! {
     let mut lpclk = LoopClock::init();
     let mut dtct = DetectPosition::init();
     let mut pled = PositionLed::init();
-    let mut swevt: [SwitchEvent; MAX_DEVICE_MBR3110] = Default::default();
+    let mut swevt: [SwitchEvent; MAX_KAMABOKO_NUM] = Default::default();
 
     // Touch部白色LEDの Mute 解除
     en_whiteled();
@@ -331,7 +331,7 @@ fn main() -> ! {
 
         if ev10ms {
             let mut touch_someone = false;
-            for i in 0..MAX_DEVICE_MBR3110 {
+            for i in 0..MAX_KAMABOKO_NUM {
                 if available_each_device[i] {
                     Pca9544::change_i2cbus(0, 0, i);
                     match Mbr3110::read_touch_sw(0, i) {
@@ -421,7 +421,7 @@ fn check_and_setup_board(ledchk_mode: bool) {
     } else {
         // CapSense Setup Mode
         Ada88::write_letter(21); // SU
-        for i in 0..MAX_DEVICE_MBR3110 {
+        for i in 0..MAX_KAMABOKO_NUM {
             Pca9544::change_i2cbus(0, 0, i);
             let err = Mbr3110::setup_device(i);
             if err == 0 {
