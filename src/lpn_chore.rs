@@ -9,6 +9,7 @@ pub const MAX_KAMABOKO_NUM: usize = 12; // 1system あたりの KAMABOKO(Sensor 
 pub const MAX_ELECTRODE_PER_DEV: usize = 8;
 pub const MAX_EACH_LIGHT: usize = 16;
 pub const MAX_NOTE: usize = 96; // 1system が取りうる最大 Note 番号
+pub const MAX_LOCATE: i32 = (MAX_NOTE as i32) * 100; // 1systemの仮想的な変化幅
 
 pub const MAX_TOUCH_EV: usize = 8;
 pub const MAX_EACH_SENS: usize = 8; // 一つの Holder にあるセンサーの数
@@ -274,7 +275,8 @@ impl DetectPosition {
         let mut start: bool = false;
         let mut new_ev: [TouchEvent; MAX_TOUCH_EV] = [Default::default(); MAX_TOUCH_EV];
         let mut ev: usize = 0;
-        const MAKE_POSITION: i32 = 9600 / ((MAX_KAMABOKO_NUM as i32) * (MAX_EACH_SENS as i32) * 2);
+        const MAKE_POSITION: i32 =
+            MAX_LOCATE / ((MAX_KAMABOKO_NUM as i32) * (MAX_EACH_SENS as i32) * 2);
 
         for idx in 0..MAX_KAMABOKO_NUM * MAX_EACH_SENS {
             let which_dev = idx / MAX_EACH_SENS;
@@ -390,12 +392,13 @@ impl PositionLed {
         // Touch 位置を光らせる
         self.light_lvl = [0; MAX_EACH_LIGHT * MAX_KAMABOKO_NUM];
         let mut _max_ev: i32 = 0;
+        const MAKE_FRAC: i32 = MAX_LOCATE / ((MAX_EACH_LIGHT as i32) * (MAX_KAMABOKO_NUM as i32));
         for i in 0..MAX_TOUCH_EV {
             if tchev[i] == TouchEvent::NOTHING {
                 break;
             }
-            let frac = tchev[i] % 100;
-            let pos = (tchev[i] / 100) as usize;
+            let frac = tchev[i] % MAKE_FRAC;
+            let pos = (tchev[i] / MAKE_FRAC) as usize;
             for j in 0..2 {
                 // タッチ位置とその両側
                 let tm100 = 100 * (j as i32);
