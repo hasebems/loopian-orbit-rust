@@ -275,7 +275,7 @@ fn main() -> ! {
     setup_midi();
 
     // Application Setup mode
-    let mut available_each_device = [true; MAX_KAMABOKO_NUM];
+    let mut available_each_device = [false; 16];
     if setup_mode {
         check_and_setup_board(ledchk_mode);
         // 戻ってこない
@@ -285,10 +285,15 @@ fn main() -> ! {
         for i in 0..MAX_KAMABOKO_NUM {
             Pca9544::change_i2cbus(0, 0, i);
             let err = Mbr3110::init(i);
-            led1_on();
             if err != 0 {
                 available_each_device[i] = false;
                 exist_err = err;
+                led1_off();
+                Ada88::write_letter(24); //--
+            } else {
+                available_each_device[i] = true;
+                led1_on();
+                Ada88::write_number(i as i16);
             }
         }
         let mut disp_num: i32;
@@ -306,7 +311,9 @@ fn main() -> ! {
             disp_num = 22; // OK
         }
         Ada88::write_letter(disp_num as usize);
-        delay_msec(3000);
+        delay_msec(2000);
+        Ada88::write_org_bit(available_each_device);
+        delay_msec(2000);
     }
 
     // Initialize Variables
