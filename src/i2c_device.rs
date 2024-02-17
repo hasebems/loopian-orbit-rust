@@ -643,7 +643,16 @@ impl Ada88 {
     }
     pub fn write_letter(ltr: usize) {
         let mut wrdt: [u8; 17] = [0; 17];
-        const LETTER_DOT: [[u8; 8]; 24] = [
+        const LETTER_DOT: [[u8; 8]; 25] = [
+            // mn : LETTER_DOT[m] = 76543210:bit
+            // 07 00 01 02 03 04 05 06
+            // 17 10 11 12 13 14 15 16
+            // 27 20 21 22 23 24 25 26
+            // 37 30 31 32 33 34 35 36
+            // 47 40 41 42 43 44 45 46
+            // 57 50 51 52 53 54 55 56
+            // 67 60 61 62 63 64 65 66
+            // 77 70 71 72 73 74 75 76
             [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], //	0:nothing
             [0x02, 0x05, 0x88, 0x88, 0x8f, 0x88, 0x88, 0x88], //	1:A
             [0x87, 0x88, 0x88, 0x87, 0x88, 0x88, 0x88, 0x87], //	2:B
@@ -668,6 +677,7 @@ impl Ada88 {
             [0x03, 0x80, 0x80, 0x49, 0x4a, 0x4a, 0xca, 0x79], //	21:SU(setup)
             [0x09, 0x8a, 0xca, 0xaa, 0x9a, 0xaa, 0xaa, 0x49], //	22:Ok
             [0x83, 0x80, 0x80, 0xab, 0xd8, 0x88, 0x88, 0x8b], //	23:Er
+            [0x00, 0x00, 0x00, 0x00, 0x33, 0x00, 0x00, 0x00], //	24:--
         ];
         for (i, dt) in LETTER_DOT[ltr].iter().enumerate() {
             wrdt[2 * i + 1] = *dt;
@@ -740,6 +750,56 @@ impl Ada88 {
         }
         let adrs = I2cAdrs(0, Self::I2C_ADRS);
         i2c_write(&adrs, &wrdt);
+    }
+    //---------------------------------------------------------
+    pub fn write_bit(num: u16) //	num 0x0000 - 0xffff
+    {
+        //  oooooooo : No Light
+        //  oooooooo : No Light
+        //  oooooooo : No Light
+        //  oooooooo : No Light
+        //  oooooooo : No Light
+        //  oooooooo : No Light
+        //  01234567 : Upper 8bit Display
+        //  01234567 : Lower 8bit Display
+        //------------
+        let mut i2c_bufx = [0 as u8; 17];
+        let mut led_ptn = [0 as u8; 8];
+
+        //  upper 8bit
+        let mut lsb: u8 = 0x00;
+        let mut bits = ((num >> 8) & 0x00ff) as u8;
+        if (bits & 0x01) != 0 {
+            lsb = 0x80;
+        }
+        led_ptn[6] = (bits >> 1) + lsb; // upper
+
+        //  lower 8bit
+        bits = (num & 0x00ff) as u8;
+        lsb = 0x00;
+        if (bits & 0x01) != 0 {
+            lsb = 0x80;
+        }
+        led_ptn[7] = (bits >> 1) + lsb; // lower
+
+        //  Set LED I2C Buffer
+        i2c_bufx[0] = 0;
+        for i in 0..8 {
+            i2c_bufx[i * 2 + 1] = led_ptn[i];
+            i2c_bufx[i * 2 + 2] = 0;
+        }
+        let adrs = I2cAdrs(0, Self::I2C_ADRS);
+        i2c_write(&adrs, &i2c_bufx);
+    }
+    //---------------------------------------------------------
+    pub fn write_org_bit(bit: [bool; 16]) {
+        let mut num: u16 = 0; //	num 0x0000 - 0xffff
+        for i in 0..16 {
+            if bit[i] {
+                num += 0x0001 << i;
+            }
+        }
+        Self::write_bit(num);
     }
 }
 //-------------------------------------------------------------------------
