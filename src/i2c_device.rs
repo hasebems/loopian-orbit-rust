@@ -370,9 +370,9 @@ impl Mbr3110 {
         delay_msec(900);
     }
     //-------------------------------------------------------------------------
-    pub fn init(number: usize) -> i32 {
+    pub fn init(number: usize) -> Result<i32, i32> {
         if number >= MAX_DEVICE_NUM {
-            return -1;
+            return Err(-1);
         }
 
         let config_data: &[u8; CONFIG_DATA_SZ] = &CY8CMBR3110_CONFIG_DATA[number];
@@ -380,37 +380,30 @@ impl Mbr3110 {
 
         let check_sum_l: u8 = config_data[126];
         let check_sum_h: u8 = config_data[127];
-        let mut err = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs);
-        if err != 0 {
-            return err;
+        if let Err(e) = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs) {
+            return Err(e);
         }
 
-        let result = Self::self_test(number);
-        match result {
-            Ok(self_check_result) => {
-                if (self_check_result & 0x80) != 0 {
-                    err = (self_check_result & 0x1f) as i32; //  SENSOR_COUNT
-                }
-            }
-            Err(er) => return er,
+        match Self::self_test(number) {
+            Err(err) => return Err(err),
+            Ok(_) => return Ok(0),
         }
-        err
     }
     //-------------------------------------------------------------------------
-    pub fn setup_device(number: usize) -> i32 {
+    pub fn setup_device(number: usize) -> Result<i32, i32> {
         let i2c_adrs: u8 = MBR_I2C_ADDRESS[number];
         if number >= MAX_DEVICE_NUM {
-            return -1;
+            return Err(-1);
         }
         Self::reset(&I2cAdrs(0, i2c_adrs));
 
         let config_data = &CY8CMBR3110_CONFIG_DATA[number];
         let check_sum_l = config_data[126];
         let check_sum_h = config_data[127];
-        if Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs) == 0 {
+        if let Ok(_) = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs) {
             //  checksum got correct.
             //  it doesn't need to write config.
-            return 0;
+            return Ok(1);
         }
 
         //  check if factory preset device
@@ -420,35 +413,31 @@ impl Mbr3110 {
             //    and rewrite config to current device
             err = Self::write_config(number, i2c_adrs);
             if err != 0 {
-                return err;
+                return Err(err);
             }
         }
 
         //  After writing, Check again.
         Self::reset(&I2cAdrs(0, i2c_adrs));
-        err = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs);
-        if err != 0 {
-            //  checksum error
-            return err;
+        if let Err(e) = Self::check_write_config(check_sum_l, check_sum_h, i2c_adrs) {
+            return Err(e); //  checksum error
         }
 
-        //let result = Mbr3110::self_test(env, number);
         match Self::self_test(number) {
-            Err(err) => return err,
-            Ok(check_result) => {
-                if (check_result & 0x80) != 0 {
-                    return (check_result & 0x1f_u8) as i32;
-                }
-            }
+            Err(err) => return Err(err),
+            Ok(_) => return Ok(0),
         }
-        return err;
     }
     //-------------------------------------------------------------------------
-    fn self_test(number: usize) -> Result<u8, i32> {
+    fn self_test(number: usize) -> Result<i32, i32> {
         let wt_dt: [u8; 1] = [TOTAL_WORKING_SNS];
         let adrs = I2cAdrs(0, MBR_I2C_ADDRESS[number]);
         if let Some(dt) = i2c_read::<1>(&adrs, &wt_dt) {
-            Ok(dt[0])
+            if (dt[0] & 0x80) != 0 {
+                Err((dt[0] & 0x1f) as i32) // 合格したセンサー数
+            } else {
+                Ok(0)
+            }
         } else {
             Err(-3)
         }
@@ -484,20 +473,20 @@ impl Mbr3110 {
         }
     }
     //-------------------------------------------------------------------------
-    fn check_write_config(check_sum_l: u8, check_sum_h: u8, crnt_adrs: u8) -> i32 {
+    fn check_write_config(check_sum_l: u8, check_sum_h: u8, crnt_adrs: u8) -> Result<i32, i32> {
         let mut cnt = 0;
         let adrs = I2cAdrs(0, crnt_adrs);
 
         loop {
             if let Some(dt) = i2c_read::<2>(&adrs, &[CONFIG_CRC]) {
                 if (dt[0] == check_sum_l) && (dt[1] == check_sum_h) {
-                    return 0;
+                    return Ok(0);
                 }
             }
             delay_msec(1);
             cnt += 1;
             if cnt > 500 {
-                return -2;
+                return Err(-2);
             }
         }
     }

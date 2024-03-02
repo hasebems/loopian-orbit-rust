@@ -284,16 +284,18 @@ fn main() -> ! {
         let mut exist_err = 0;
         for i in 0..MAX_KAMABOKO_NUM {
             Pca9544::change_i2cbus(0, 0, i);
-            let err = Mbr3110::init(i);
-            if err != 0 {
-                available_each_device[i] = false;
-                exist_err = err;
-                led1_off();
-                Ada88::write_letter(24); //--
-            } else {
-                available_each_device[i] = true;
-                led1_on();
-                Ada88::write_number(i as i16);
+            match Mbr3110::init(i) {
+                Ok(_) => {
+                    available_each_device[i] = true;
+                    led1_on();
+                    Ada88::write_number((i as i16) * 10);
+                }
+                Err(err) => {
+                    available_each_device[i] = false;
+                    exist_err = err;
+                    led1_off();
+                    Ada88::write_letter(24); //--
+                }
             }
         }
         let mut disp_num: i32;
@@ -409,7 +411,7 @@ fn main() -> ! {
 //          System Functions
 //*******************************************************************
 fn check_and_setup_board(ledchk_mode: bool) {
-    let mut sup_ok: bool = false;
+    let mut sup_ok: bool = true;
     if ledchk_mode {
         const MAX_EACH_LIGHT: usize = 16;
         Ada88::write_letter(2); //"B"
@@ -418,9 +420,11 @@ fn check_and_setup_board(ledchk_mode: bool) {
         en_whiteled();
         loop {
             for l in 0..2 {
-                for e in 0..MAX_EACH_LIGHT {
-                    let bright: u16 = if (e % 2) == 0 { l } else { (l + 1) % 2 };
-                    PositionLed::light_led_each(e, 0, bright * 200);
+                for k in 0..MAX_KAMABOKO_NUM {
+                    for e in 0..MAX_EACH_LIGHT {
+                        let bright: u16 = if (e % 2) == 0 { l } else { (l + 1) % 2 };
+                        PositionLed::light_led_each(e, k, bright * 200);
+                    }
                 }
                 delay_msec(200);
             }
@@ -428,20 +432,16 @@ fn check_and_setup_board(ledchk_mode: bool) {
     } else {
         // CapSense Setup Mode
         Ada88::write_letter(21); // SU
+        delay_msec(5000);
         for i in 0..MAX_KAMABOKO_NUM {
             Pca9544::change_i2cbus(0, 0, i);
-            let err = Mbr3110::setup_device(i);
-            if err == 0 {
-                Ada88::write_letter(22); // Ok
-                sup_ok = true;
-                for _ in 0..3 {
-                    // when finished, flash 3times.
-                    lederr_on();
-                    delay_msec(100);
-                    lederr_off();
-                    delay_msec(100);
-                }
-                delay_msec(100);
+            let success = setup_mbr(i);
+            if success == 0 {
+                break;
+            } else if success == 1 {
+                continue;
+            } else {
+                sup_ok = false;
                 break;
             }
         }
@@ -449,10 +449,35 @@ fn check_and_setup_board(ledchk_mode: bool) {
 
     if !sup_ok {
         Ada88::write_letter(23); // Er
-                                 //lederr_on(); // Err LED on
+        lederr_on(); // Err LED on
     }
 
     loop {}
+}
+fn setup_mbr(num: usize) -> i32 {
+    match Mbr3110::setup_device(num) {
+        Ok(v) => {
+            if v == 0 {
+                // 書き込みしてOKだった場合
+                Ada88::write_letter(22); // Ok
+                for _ in 0..3 {
+                    // when finished, flash 3times.
+                    lederr_on();
+                    delay_msec(100);
+                    lederr_off();
+                    delay_msec(100);
+                }
+                delay_msec(500);
+                Ada88::write_number(num as i16); // sensor No.
+                delay_msec(2000);
+                0
+            } else {
+                Ada88::write_letter(24); //--
+                1
+            }
+        }
+        Err(_) => -1,
+    }
 }
 fn delay_msec(time: u32) {
     let mut first: Option<u32> = None;
