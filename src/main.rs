@@ -58,7 +58,7 @@ static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0)); //49日で一
 static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
 static mut MIDI: Option<MidiClass<hal::usb::UsbBus>> = None;
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
-//static mut ADC: Option<Adc> = None;
+static mut ADC: Option<Adc> = None;
 
 static mut PIN_LED: Option<hal::gpio::Pin<crate::bank0::Gpio25, FunctionSio<SioOutput>, PullDown>> =
     None;
@@ -66,7 +66,6 @@ static mut PIN_J44: Option<hal::gpio::Pin<crate::bank0::Gpio13, FunctionSio<SioI
     None;
 static mut PIN_JSTK: Option<hal::gpio::Pin<crate::bank0::Gpio14, FunctionSio<SioInput>, PullDown>> =
     None;
-/*
 static mut ADC_PIN_1: Option<
     AdcPin<
         rp_pico::hal::gpio::Pin<crate::bank0::Gpio26, FunctionNull, rp_pico::hal::gpio::PullDown>,
@@ -77,7 +76,6 @@ static mut ADC_PIN_2: Option<
         rp_pico::hal::gpio::Pin<crate::bank0::Gpio27, FunctionNull, rp_pico::hal::gpio::PullDown>,
     >,
 > = None;
-*/
 static mut PIN_WHITELED_EN: Option<
     hal::gpio::Pin<crate::bank0::Gpio15, FunctionSio<SioOutput>, PullDown>,
 > = None;
@@ -214,7 +212,7 @@ fn main() -> ! {
 
     // GPIO
     let mut setup_mode: bool = false;
-    let mut ledchk_mode: bool = false;
+    //let mut ledchk_mode: bool = false;
     unsafe {
         PIN_LED = Some(pins.led.into_push_pull_output());
         PIN_J44 = Some(pins.gpio13.into_pull_down_input());
@@ -223,9 +221,9 @@ fn main() -> ! {
         PIN_LED_ERR = Some(pins.gpio16.into_push_pull_output());
         PIN_LED_1 = Some(pins.gpio17.into_push_pull_output());
         PIN_LED_2 = Some(pins.gpio22.into_push_pull_output());
-        if let Some(pin_swj44) = &mut PIN_J44 {
-            ledchk_mode = pin_swj44.is_low().unwrap();
-        }
+        //if let Some(pin_swj44) = &mut PIN_J44 {
+        //    ledchk_mode = pin_swj44.is_low().unwrap();
+        //}
         if let Some(pin_joysticksw) = &mut PIN_JSTK {
             setup_mode = pin_joysticksw.is_low().unwrap();
         }
@@ -237,16 +235,12 @@ fn main() -> ! {
     ledboard_on();
 
     // Enable ADC
-    //    unsafe {
-    //        ADC = Some(Adc::new(pac.ADC, &mut pac.RESETS));
-    //        // Configure GPIO26 as an ADC input
-    //        ADC_PIN_1 = Some(AdcPin::new(pins.gpio26));
-    //        ADC_PIN_2 = Some(AdcPin::new(pins.gpio27));
-    //    }
-    let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
-    // Configure GPIO26 as an ADC input
-    let mut adc_pin_0 = AdcPin::new(pins.gpio26);
-    let mut adc_pin_1 = AdcPin::new(pins.gpio27);
+    unsafe {
+        ADC = Some(Adc::new(pac.ADC, &mut pac.RESETS));
+        // Configure GPIO26 as an ADC input
+        ADC_PIN_1 = Some(AdcPin::new(pins.gpio26));
+        ADC_PIN_2 = Some(AdcPin::new(pins.gpio27));
+    }
 
     // SysTickの設定
     // 自前でSysTickを制御するときは cortex_m::delay::Delay が使えないので注意
@@ -274,6 +268,14 @@ fn main() -> ! {
     //        &clocks.system_clock,
     //    );
     Ada88::init();
+
+    for i in 0..MAX_KAMABOKO_NUM {
+        Pca9544::change_i2cbus(0, 3, i);
+        Pca9685::init(0, i + 16); // delay_msec() の後に置くと、LEDが光らない
+        Pca9544::change_i2cbus(0, 1, i);
+    }
+
+    // Opening
     for i in 0..4 {
         Ada88::write_letter(26 + i);
         delay_msec(300);
@@ -282,13 +284,8 @@ fn main() -> ! {
         Ada88::write_letter(28 - i);
         delay_msec(300);
     }
-    Ada88::write_number(29);
+    Ada88::write_number(39); // version No.
     delay_msec(500);
-    for i in 0..MAX_KAMABOKO_NUM {
-        Pca9544::change_i2cbus(0, 3, i);
-        Pca9685::init(0, i + 16);
-        Pca9544::change_i2cbus(0, 1, i);
-    }
 
     // USB MIDI
     unsafe {
@@ -412,7 +409,6 @@ fn main() -> ! {
         }
 
         // ADC
-        /*
         let mut pin_adx_value: u16 = 0;
         let mut pin_ady_value: u16 = 0;
         unsafe {
@@ -424,10 +420,8 @@ fn main() -> ! {
                     pin_ady_value = adc.read(adc2).unwrap();
                 }
             }
-        }*/
+        }
 
-        let pin_adx_value: u16 = adc.read(&mut adc_pin_0).unwrap();
-        let pin_ady_value: u16 = adc.read(&mut adc_pin_1).unwrap();
         let ad_vel_temp = if pin_adx_value > pin_ady_value {
             pin_adx_value
         } else {
@@ -454,12 +448,12 @@ fn main() -> ! {
 //*******************************************************************
 fn check_and_setup_board() {
     let mut selmode: i32 = 0;
-    //let mut incdec_old = 0;
-    //const SELMODE_MAX: i32 = 13;
+    let mut incdec_old = 0;
+    const SELMODE_MAX: i32 = 13;
 
     Ada88::write_letter(21); // SU
     delay_msec(5000);
-    /*     loop {
+    loop {
         let mut adval: u16 = 0;
         unsafe {
             if let Some(adc) = &mut ADC {
@@ -499,10 +493,9 @@ fn check_and_setup_board() {
         if swon {
             break;
         }
-    }*/
+    }
 
-    if true {
-        //selmode == 12 {
+    if selmode == 12 {
         const MAX_EACH_LIGHT: usize = 16;
         Ada88::write_letter(24); // "LE"
         delay_msec(200);
@@ -521,7 +514,7 @@ fn check_and_setup_board() {
         } //  無限ループ
     } else {
         // CapSense Setup Mode
-        //Pca9544::change_i2cbus(0, 0, i);
+        Ada88::write_number((selmode * 10) as i16);
         let success = setup_mbr(selmode as usize);
         if success == 0 {
             Ada88::write_letter(22); // Ok
@@ -551,7 +544,6 @@ fn setup_mbr(num: usize) -> i32 {
         Ok(v) => {
             if v == 0 {
                 // 書き込みしてOKだった場合
-                Ada88::write_number(num as i16); // sensor No.
                 for _ in 0..3 {
                     // when finished, flash 3times.
                     lederr_on();
@@ -560,10 +552,8 @@ fn setup_mbr(num: usize) -> i32 {
                     delay_msec(100);
                 }
                 delay_msec(500);
-                Ada88::write_letter(22); // Ok
                 0
             } else {
-                Ada88::write_letter(25); //--
                 1
             }
         }
