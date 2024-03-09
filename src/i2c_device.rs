@@ -37,7 +37,8 @@ type I2c0Env = I2C<
     ),
 >;
 //type I2c1Env = I2C<I2C1,(Pin<SDA1Pin, FunctionI2C, PullDown>,Pin<SCL1Pin, FunctionI2C, PullDown>,),>;
-pub struct I2cAdrs(u8, u8);
+pub struct I2cAdrs(u8, u8); // 現状 1側のみ有効
+
 //-------------------------------------------------------------------------
 static mut I2C_CONCLETE0: Option<I2c0Env> = None;
 //static mut I2C_CONCLETE1: Option<I2c1Env> = None;
@@ -602,7 +603,7 @@ impl Mbr3110 {
         // ** Step 4 **
         //	Get Config Data
         let adrs = I2cAdrs(0, MBR_I2C_ADDRESS[number]);
-        if let Some(dt) = i2c_read::<1>(&adrs, &[CONFIG_DATA_OFFSET]) {
+        if let Some(dt) = i2c_read::<CONFIG_DATA_SZ>(&adrs, &[CONFIG_DATA_OFFSET]) {
             //	Compare both Data
             for i in 0..CONFIG_DATA_SZ {
                 if config_data[i] != dt[i] {

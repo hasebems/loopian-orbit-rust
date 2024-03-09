@@ -89,75 +89,99 @@ static mut PIN_LED_2: Option<
     hal::gpio::Pin<crate::bank0::Gpio22, FunctionSio<SioOutput>, PullDown>,
 > = None;
 
-fn lederr_off() {
+pub fn lederr_off() {
     unsafe {
         if let Some(pin_lederr) = &mut PIN_LED_ERR {
             pin_lederr.set_low().unwrap(); // 消灯
         }
     }
 }
-fn lederr_on() {
+pub fn lederr_on() {
     unsafe {
         if let Some(pin_lederr) = &mut PIN_LED_ERR {
             pin_lederr.set_high().unwrap();
         }
     }
 }
-fn en_whiteled() {
+pub fn en_whiteled() {
     unsafe {
         if let Some(pin_whiteled_en) = &mut PIN_WHITELED_EN {
             pin_whiteled_en.set_high().unwrap();
         }
     }
 }
-fn dis_whiteled() {
+pub fn dis_whiteled() {
     unsafe {
         if let Some(pin_whiteled_en) = &mut PIN_WHITELED_EN {
             pin_whiteled_en.set_low().unwrap(); // Touch部白色LEDの Mute
         }
     }
 }
-fn led1_off() {
+pub fn led1_off() {
     unsafe {
         if let Some(pin_led) = &mut PIN_LED_1 {
             pin_led.set_low().unwrap(); // 消灯
         }
     }
 }
-fn led1_on() {
+pub fn led1_on() {
     unsafe {
         if let Some(pin_led) = &mut PIN_LED_1 {
             pin_led.set_high().unwrap();
         }
     }
 }
-fn led2_off() {
+pub fn led2_off() {
     unsafe {
         if let Some(pin_led) = &mut PIN_LED_2 {
             pin_led.set_low().unwrap(); // 消灯
         }
     }
 }
-fn led2_on() {
+pub fn led2_on() {
     unsafe {
         if let Some(pin_led) = &mut PIN_LED_2 {
             pin_led.set_high().unwrap();
         }
     }
 }
-fn ledboard_on() {
+pub fn ledboard_on() {
     unsafe {
         if let Some(pin_led) = &mut PIN_LED {
             pin_led.set_high().unwrap();
         }
     }
 }
-fn ledboard_off() {
+pub fn ledboard_off() {
     unsafe {
         if let Some(pin_led) = &mut PIN_LED {
             pin_led.set_low().unwrap();
         }
     }
+}
+pub fn get_joystick_position_x() -> u16 {
+    // 0-4095
+    let mut pin_adx_value: u16 = 0;
+    unsafe {
+        if let Some(adc) = &mut ADC {
+            if let Some(adc1) = &mut ADC_PIN_1 {
+                pin_adx_value = adc.read(adc1).unwrap();
+            }
+        }
+    }
+    pin_adx_value
+}
+pub fn get_joystick_position_y() -> u16 {
+    // 0-4095
+    let mut pin_ady_value: u16 = 0;
+    unsafe {
+        if let Some(adc) = &mut ADC {
+            if let Some(adc2) = &mut ADC_PIN_2 {
+                pin_ady_value = adc.read(adc2).unwrap();
+            }
+        }
+    }
+    pin_ady_value
 }
 //*******************************************************************
 //          interrupt/exception
@@ -284,7 +308,7 @@ fn main() -> ! {
         Ada88::write_letter(28 - i);
         delay_msec(300);
     }
-    Ada88::write_number(39); // version No.
+    Ada88::write_number(59); // version No. 一の位は9固定
     delay_msec(500);
 
     // USB MIDI
@@ -409,25 +433,9 @@ fn main() -> ! {
         }
 
         // ADC
-        let mut pin_adx_value: u16 = 0;
-        let mut pin_ady_value: u16 = 0;
-        unsafe {
-            if let Some(adc) = &mut ADC {
-                if let Some(adc1) = &mut ADC_PIN_1 {
-                    pin_adx_value = adc.read(adc1).unwrap();
-                }
-                if let Some(adc2) = &mut ADC_PIN_2 {
-                    pin_ady_value = adc.read(adc2).unwrap();
-                }
-            }
-        }
-
-        let ad_vel_temp = if pin_adx_value > pin_ady_value {
-            pin_adx_value
-        } else {
-            pin_ady_value
-        };
-        let vel_temp = DetectPosition::get_velocity_from_adc(ad_vel_temp);
+        let _pin_adx_value: u16 = get_joystick_position_x();
+        let pin_ady_value: u16 = get_joystick_position_y();
+        let vel_temp = DetectPosition::get_velocity_from_adc(pin_ady_value);
         if vel_temp != ad_velocity {
             ad_velocity = vel_temp;
             Ada88::write_number(vel_temp as i16);
@@ -454,19 +462,12 @@ fn check_and_setup_board() {
     Ada88::write_letter(21); // SU
     delay_msec(5000);
     loop {
-        let mut adval: u16 = 0;
-        unsafe {
-            if let Some(adc) = &mut ADC {
-                if let Some(adc1) = &mut ADC_PIN_1 {
-                    adval = adc.read(adc1).unwrap(); //0-4095
-                }
-            }
-        }
+        let adval: u16 = get_joystick_position_x();
         let mut incdec = 0;
         if adval > 3000 {
-            incdec += 1;
+            incdec = 1;
         } else if adval < 1000 {
-            incdec -= 1;
+            incdec = -1;
         }
         if incdec != incdec_old {
             if incdec > 0 {
@@ -560,7 +561,7 @@ fn setup_mbr(num: usize) -> i32 {
         Err(_) => -1,
     }
 }
-fn delay_msec(time: u32) {
+pub fn delay_msec(time: u32) {
     let mut first: Option<u32> = None;
     let mut diff = 0;
     let mut realtime = 0;
@@ -577,7 +578,7 @@ fn delay_msec(time: u32) {
         }
     }
 }
-fn get_msec_counter() -> u32 {
+pub fn get_msec_counter() -> u32 {
     let mut realtime = 0;
     free(|cs| {
         realtime = *COUNTER.borrow(cs).borrow();
